@@ -1,0 +1,15 @@
+name: "CI"
+on: [push, pull_request]
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setting up BATS
+        run: sudo npm install -g bats
+      
+      - name: Check out code
+        uses: actions/checkout@v2
+              
+      - name: Running tests
+        run: bats -r .
