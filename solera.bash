@@ -94,7 +94,7 @@ install_package()
 
 	local keyid="INVALID"
 
-
+	# remove artefacts from previous installations
 	remove_conf_files
 
 	# handle different ubuntu releases
@@ -164,6 +164,7 @@ install_package()
 	sudo systemctl enable "$service" &> /dev/null
 	log_action_end_msg $?
 
+	# wait five secs for service startup
 	sleep 5
 
 	log_action_begin_msg "Check status of $service"
@@ -287,15 +288,23 @@ remove_installation()
 if [ "${BASH_SOURCE[0]}" == "$0" ];
 then
 
+	# source lsb init function file for advanced log functions
+	if [[ ! -f /lib/lsb/init-functions ]]; 
+	then
+		>&2 echo "Error sourcing /lib/lsb/init-functions"
+		exit 1
+	fi
 	. /lib/lsb/init-functions
 
+	# ONLY IN DEV
 	remove_installation
 
 	# pass whole parameter list to main
-	if main "$@"; then
-		echo "SCRIPT SUCCESSFUL FINISHED"
-	else
-		echo "ERROR RUNNING SCRIPT"
+	if ! main "$@";
+	then
+		log_begin_msg "Script error"
+		log_msg_end 1
+		exit 1
 	fi
 
 fi
