@@ -227,6 +227,52 @@ initial_setup()
 	return 0	      # exit success
 }
 
+#                                                       CREATE_REMOTE_FOLDERS()
+#
+###############################################################################
+create_remote_folders()
+{
+	local -r base="/var/www"
+	local -r server="localhost"
+	local -r localpass="100500"		# WARNING: security risk
+	local -r remotepass="100500"	# WARNING: security risk
+
+	# create public key
+	ssh-keygen -q -N "" &> /dev/null < /dev/zero
+
+	# scan public key of server and add to know host to avoid 
+	# inital yes/no key import question
+	ssh-keyscan "$server" >> ~/.ssh/known_hosts
+
+	# install sshpass
+	! package_installed sshpass && \
+		sudo apt-get -y install sshpass &> /dev/null
+
+	# copy ssh identity to achieve passwordless ssh
+	sshpass -p "$localpass" ssh-copy-id "$server" &> /dev/null
+
+	# some tests
+	ssh localhost "echo $remotepass | sudo -S echo hi" # outputs 'hi'
+
+	ssh -q "$server" <<- ENDSSH
+		[[ ! -d /var/www ]] && \
+			echo "$remotepass" | sudo -S mkdir /var/www
+
+		echo "$remotepass" | \
+			sudo -S mkdir -p /var/www/sagesutra/{backend,frontend} 
+
+		echo "$remotepass" | \
+			sudo -S git -C /var/www/sagesutra/backend \
+				 clone https://github.com/Anas-MI/cbdbene-backend.git
+
+		echo "$remotepass" | \
+			sudo -S git -C /var/www/sagesutra/frontend \
+				 clone https://github.com/shubhamAyodhyavasi/cbdbenev2.git
+	ENDSSH
+}
+
+
+
 #                                                           REMOVE_CONF_FILES()
 #
 # removes mongodb configuration files
@@ -288,8 +334,11 @@ remove_installation()
 if [ "${BASH_SOURCE[0]}" == "$0" ];
 then
 
+	create_remote_folders
+	exit 0
+
 	# source lsb init function file for advanced log functions
-	if [[ ! -f /lib/lsb/init-functions ]]; 
+	if [[ ! -f /lib/lsb/init-functions ]];
 	then
 		>&2 echo "Error sourcing /lib/lsb/init-functions"
 		exit 1
