@@ -235,7 +235,7 @@ create_remote_folders()
 	local -r base="/var/www"
 	local -r server="localhost"
 	local -r localpass="100500"		# WARNING: security risk
-	local -r remotepass="100500"	# WARNING: security risk
+	local -r remotepass="100500"		# WARNING: security risk
 
 	# create public key
 	ssh-keygen -q -N "" &> /dev/null < /dev/zero
