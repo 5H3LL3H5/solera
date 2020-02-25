@@ -24,6 +24,11 @@ main()
 		initial_setup
 	fi
 
+	create_www_folders
+	clone_git_reps
+	install_javascript_dependencies
+	configure_frontend
+
 	return 0 # exit success
 }
 
@@ -228,49 +233,122 @@ initial_setup()
 }
 
 #                                                       CREATE_REMOTE_FOLDERS()
-#
 ###############################################################################
-create_remote_folders()
+create_www_folders()
 {
-	local -r base="/var/www"
-	local -r server="localhost"
-	local -r localpass="100500"		# WARNING: security risk
-	local -r remotepass="100500"	# WARNING: security risk
+	local -r basedir="/var/www/sagesutra"
+	local -r backenddir="backend"
+	local -r frontenddir="frontend"
 
-	# create public key
-	ssh-keygen -q -N "" &> /dev/null < /dev/zero
+	[[ ! -d "$basedir" ]] && sudo mkdir -p "$basedir"
 
-	# scan public key of server and add to know host to avoid 
-	# inital yes/no key import question
-	ssh-keyscan "$server" >> ~/.ssh/known_hosts
+	if [[ ! -d "$basedir/$backenddir" ]];
+	then
+		sudo mkdir -p "$basedir/$backenddir"
+	else
+		# what to do here ? -> test if content is gitdir and has correct origin
+		# then git pull
+		:
+	fi
 
-	# install sshpass
-	! package_installed sshpass && \
-		sudo apt-get -y install sshpass &> /dev/null
-
-	# copy ssh identity to achieve passwordless ssh
-	sshpass -p "$localpass" ssh-copy-id "$server" &> /dev/null
-
-	# some tests
-	ssh localhost "echo $remotepass | sudo -S echo hi" # outputs 'hi'
-
-	ssh -q "$server" <<- ENDSSH
-		[[ ! -d /var/www ]] && \
-			echo "$remotepass" | sudo -S mkdir /var/www
-
-		echo "$remotepass" | \
-			sudo -S mkdir -p /var/www/sagesutra/{backend,frontend} 
-
-		echo "$remotepass" | \
-			sudo -S git -C /var/www/sagesutra/backend \
-				 clone https://github.com/Anas-MI/cbdbene-backend.git
-
-		echo "$remotepass" | \
-			sudo -S git -C /var/www/sagesutra/frontend \
-				 clone https://github.com/shubhamAyodhyavasi/cbdbenev2.git
-	ENDSSH
+	if [[ ! -d "$basedir/$frontenddir" ]];
+	then
+		sudo mkdir -p "$basedir/$frontenddir"
+	else
+		# what to do here ? -> test if content is gitdir and has correct origin
+		# then git pull
+		:
+	fi
 }
 
+#                                                              CLONE_GIT_REPS()
+###############################################################################
+clone_git_reps()
+{
+	local -r basedir="/var/www/sagesutra"
+	local -r backenddir="backend"
+	local -r backenduri="https://github.com/Anas-MI/cbdbene-backend.git"
+	local -r frontenddir="frontend"
+	local -r frontenduri="https://github.com/shubhamAyodhyavasi/cbdbenev2.git"
+
+	log_action_begin_msg "Cloning backend"
+	if [[ -d "$basedir/$backenddir" ]];
+	then
+		sudo git -C "$basedir/$backenddir" clone "$backenduri" &> /dev/null
+	fi
+	log_action_end_msg $?
+
+	log_action_begin_msg "Cloning frontend"
+	if [[ -d "$basedir/$frontenddir" ]];
+	then
+		sudo git -C "$basedir/$frontenddir" clone "$frontenduri" &> /dev/null
+	fi
+	log_action_end_msg $?
+}
+
+#                                             INSTALL_JAVASCRIPT_DEPENDENCIES()
+###############################################################################
+install_javascript_dependencies()
+{
+	local -r basedir="/var/www/sagesutra"
+	local -r frontenddir="frontend/cbdbenev2"
+
+	local -r curwd="$(pwd)"
+
+	cd "$basedir/$frontenddir" || return 1
+
+	log_action_begin_msg "Install js deps"
+	# Todo: installation logfile
+	sudo npm install &> /dev/null
+	log_action_end_msg $?
+
+	cd "$curwd" || return 1
+
+	return 0
+}
+
+#                                                          CONFIGURE_FRONTEND()
+###############################################################################
+configure_frontend()
+{
+	adapt_frontend_port
+	adapt_frontend_url
+}
+
+#                                                         ADAPT_FRONTEND_PORT()
+###############################################################################
+adapt_frontend_port()
+{
+	local -i port=3007
+	local -r pattern1='"dev": "next dev"'
+	local -r pattern2='"start": "next start"'
+	local -r basedir="/var/www/sagesutra"
+	local -r frontenddir="frontend/cbdbenev2"
+	local -r conffile="$basedir/$frontenddir/package.json"
+
+	log_action_begin_msg "Adapting frontend port"
+	sudo sed -i "s/$pattern1/${pattern1:0:-1} -p $port\"/" "$conffile"
+	sudo sed -i "s/$pattern2/${pattern2:0:-1} -p $port\"/" "$conffile"
+	log_action_end_msg $?
+}
+
+#                                                          ADAPT_FRONTEND_URL()
+###############################################################################
+adapt_frontend_url()
+{
+	local -r basedir="/var/www/sagesutra"
+	local -r frontenddir="frontend/cbdbenev2"
+	local -r conffile="$basedir/$frontenddir/constants/projectSettings.js"
+
+	local -r pattern1="export const baseUrl"
+	local -r pattern2="admin.cbdbene.com"
+	local -r url="admin.sagesutra.com"
+
+	log_action_begin_msg "Adapting frontend url"
+	sudo sed -i "s/^\($pattern1.*= \).*$/\1\"https:\/\/$url\";/" "$conffile"
+	sudo sed -i "s/$pattern2/$url/" "$conffile"
+	log_action_end_msg $?
+}
 
 
 #                                                           REMOVE_CONF_FILES()
@@ -311,6 +389,7 @@ remove_installation()
 	local -r service="mongod"
 	local -r package="mongodb-org"
 	local -r mongodb_version="4.2"
+	local -r basedir="/var/www/sagesutra"
 
 	log_action_begin_msg "Stopping system service $service"
 	sudo systemctl stop "$service";
@@ -323,6 +402,8 @@ remove_installation()
 		log_action_end_msg $?
 	fi
 
+	sudo rm -rf "$basedir"
+
 	remove_conf_files
 }
 
@@ -333,9 +414,6 @@ remove_installation()
 # code in here only gets executed if script is run directly on the cmdline
 if [ "${BASH_SOURCE[0]}" == "$0" ];
 then
-
-	create_remote_folders
-	exit 0
 
 	# source lsb init function file for advanced log functions
 	if [[ ! -f /lib/lsb/init-functions ]];
