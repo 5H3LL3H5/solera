@@ -20,7 +20,7 @@ main()
 
 	if ! package_installed "$package";
 	then
-		install_package "$package"
+		install_mongodb_package "$package"
 		initial_setup
 	fi
 
@@ -66,23 +66,59 @@ package_installed()
 	fi
 
 	return 0                    # package already installed
-}
-
-#                                                           CHECK_CONFIG_FILE()
-#
-# checks config file syntax
-###############################################################################
+} #                                                           CHECK_CONFIG_FILE() # # checks config file syntax ###############################################################################
 check_config_file()
 {
 	return 0	      # exit success
 }
 
-#                                                          INSTALL_DB_PACKAGE()
+#                                                         INSTALL_APT_PACKAGE()
+#
+# installs apt package
+#
+# @param[in]	package		package name
+###############################################################################
+install_apt_package()
+{
+  local -r package="$1"
+
+  echo "REIN"
+	if package_installed "$package" == 3
+  then
+
+  echo "GO"
+	  log_action_begin_msg "Installing $package via apt"
+    sudo apt-get -y install "$package" &> /dev/null
+    log_msg_end $?
+  fi
+  echo "RAUS"
+}
+
+#                                                         INSTALL_NPM_PACKAGE()
+#
+# installs npm package
+#
+# @param[in]	package		package name
+###############################################################################
+install_npm_package()
+{
+  local -r package="$1"
+
+
+	if ! npm list -g "$package"
+  then
+	  log_action_begin_msg "Installing $package via npm"
+    sudo npm install -g "$package" &> /dev/null
+    log_msg_end $?
+  fi
+}
+
+#                                                      INSTALL_MOGODB_PACKAGE()
 #
 # installs database package
 # source: https://www.howtoforge.com/tutorial/install-mongodb-on-ubuntu-16.04
 ###############################################################################
-install_package()
+install_mongodb_package()
 {
 	local -r mongodb_version="4.2"
 	local -r keyserver="hkp://keyserver.ubuntu.com"
@@ -134,9 +170,7 @@ install_package()
 	log_action_begin_msg "Updating apt database"
 	sudo apt-get update &> /dev/null
 	log_action_end_msg $?
-	log_action_begin_msg "Installing $package via apt"
-	sudo apt-get install -y "$package" &> /dev/null
-	log_action_end_msg $?
+  install_apt_package "$package"
 
 	# create mongo db system service
 	cat <<-EOF | \
@@ -161,10 +195,7 @@ install_package()
 	log_action_end_msg $?
 
 	# start MongoDB and add it as a service to be started at boot time
-	log_action_begin_msg "Starting $service"
-	sudo systemctl start "$service" &> /dev/null
-	log_action_end_msg $?
-
+	log_action_begin_msg "Starting $service" sudo systemctl start "$service" &> /dev/null log_action_end_msg $?
 	log_action_begin_msg "Enabling $service"
 	sudo systemctl enable "$service" &> /dev/null
 	log_action_end_msg $?
@@ -296,6 +327,9 @@ install_javascript_dependencies()
 	local -r curwd="$(pwd)"
 
 	cd "$basedir/$frontenddir" || return 1
+
+  install_apt_package npm
+  install_npm_package pm2
 
 	log_action_begin_msg "Install js deps"
 	# Todo: installation logfile
