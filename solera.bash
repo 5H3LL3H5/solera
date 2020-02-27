@@ -28,9 +28,15 @@ main()
 	clone_git_reps
 	install_javascript_dependencies
 	configure_frontend
+	configure_backend
+	sleep 1
+	start_backend
+	sleep 1
+	start_frontend
 
 	return 0 # exit success
 }
+
 
 #                                                           PACKAGE_INSTALLED()
 #
@@ -66,11 +72,18 @@ package_installed()
 	fi
 
 	return 0                    # package already installed
-} #                                                           CHECK_CONFIG_FILE() # # checks config file syntax ###############################################################################
+}
+
+
+#                                                           CHECK_CONFIG_FILE()
+#
+# checks config file syntax
+###############################################################################
 check_config_file()
 {
 	return 0	      # exit success
 }
+
 
 #                                                         INSTALL_APT_PACKAGE()
 #
@@ -80,19 +93,16 @@ check_config_file()
 ###############################################################################
 install_apt_package()
 {
-  local -r package="$1"
+	local -r package="$1"
 
-  echo "REIN"
-	if package_installed "$package" == 3
-  then
-
-  echo "GO"
-	  log_action_begin_msg "Installing $package via apt"
-    sudo apt-get -y install "$package" &> /dev/null
-    log_msg_end $?
-  fi
-  echo "RAUS"
+	if [[ $(package_installed "$package") == 3 ]];
+	then
+		log_action_begin_msg "Installing $package via apt"
+		sudo apt-get -y install "$package" &> /dev/null
+		log_msg_end $?
+	fi
 }
+
 
 #                                                         INSTALL_NPM_PACKAGE()
 #
@@ -102,16 +112,16 @@ install_apt_package()
 ###############################################################################
 install_npm_package()
 {
-  local -r package="$1"
+	local -r package="$1"
 
-
-	if ! npm list -g "$package"
-  then
-	  log_action_begin_msg "Installing $package via npm"
-    sudo npm install -g "$package" &> /dev/null
-    log_msg_end $?
-  fi
+	if ! npm list -g "$package" &> /dev/null;
+	then
+		log_action_begin_msg "Installing $package via npm"
+		sudo npm install -g "$package" &> /dev/null
+		log_msg_end $?
+	fi
 }
+
 
 #                                                      INSTALL_MOGODB_PACKAGE()
 #
@@ -170,7 +180,7 @@ install_mongodb_package()
 	log_action_begin_msg "Updating apt database"
 	sudo apt-get update &> /dev/null
 	log_action_end_msg $?
-  install_apt_package "$package"
+	install_apt_package "$package"
 
 	# create mongo db system service
 	cat <<-EOF | \
@@ -195,7 +205,8 @@ install_mongodb_package()
 	log_action_end_msg $?
 
 	# start MongoDB and add it as a service to be started at boot time
-	log_action_begin_msg "Starting $service" sudo systemctl start "$service" &> /dev/null log_action_end_msg $?
+	log_action_begin_msg "Starting $service"
+	sudo systemctl start "$service" &> /dev/null log_action_end_msg $?
 	log_action_begin_msg "Enabling $service"
 	sudo systemctl enable "$service" &> /dev/null
 	log_action_end_msg $?
@@ -214,6 +225,7 @@ install_mongodb_package()
 	fi
 }
 
+
 #                                                            INITIAL_DB_SETUP()
 #
 # inital database setup
@@ -227,8 +239,8 @@ initial_setup()
 
 	log_action_begin_msg "Deleting MongoDB user $username"
 	mongo --quiet --eval "
-		db=db.getSiblingDB(\"$db\");
-		db.dropUser(\"$username\")
+	db=db.getSiblingDB(\"$db\");
+	db.dropUser(\"$username\")
 	" &> /dev/null
 	log_action_end_msg $?
 
@@ -236,11 +248,10 @@ initial_setup()
 	mongo --quiet --eval "
 		db=db.getSiblingDB(\"$db\");
 		db.createUser({
-			user:\"$username\", \
+		user:\"$username\", \
 			pwd:\"$password\", \
 			roles:[{role:'root', db:'$db'}]
-		})
-	" &> /dev/null
+	})" &> /dev/null
 	log_action_end_msg $?
 
 	log_action_begin_msg "Adapting $service configuration"
@@ -262,6 +273,7 @@ initial_setup()
 
 	return 0	      # exit success
 }
+
 
 #                                                       CREATE_REMOTE_FOLDERS()
 ###############################################################################
@@ -292,6 +304,7 @@ create_www_folders()
 	fi
 }
 
+
 #                                                              CLONE_GIT_REPS()
 ###############################################################################
 clone_git_reps()
@@ -317,29 +330,38 @@ clone_git_reps()
 	log_action_end_msg $?
 }
 
+
 #                                             INSTALL_JAVASCRIPT_DEPENDENCIES()
 ###############################################################################
 install_javascript_dependencies()
 {
 	local -r basedir="/var/www/sagesutra"
+	local -r backenddir="backend/cbdbene-backend"
 	local -r frontenddir="frontend/cbdbenev2"
 
 	local -r curwd="$(pwd)"
 
+	install_apt_package npm
+	install_npm_package pm2
+
 	cd "$basedir/$frontenddir" || return 1
-
-  install_apt_package npm
-  install_npm_package pm2
-
 	log_action_begin_msg "Install js deps"
-	# Todo: installation logfile
+	# Todo: logfile
 	sudo npm install &> /dev/null
 	log_action_end_msg $?
-
 	cd "$curwd" || return 1
+
+	cd "$basedir/$backenddir" || return 1
+	log_action_begin_msg "Install js deps"
+	# Todo: logfile
+	sudo npm install &> /dev/null
+	log_action_end_msg $?
+	cd "$curwd" || return 1
+
 
 	return 0
 }
+
 
 #                                                          CONFIGURE_FRONTEND()
 ###############################################################################
@@ -348,6 +370,7 @@ configure_frontend()
 	adapt_frontend_port
 	adapt_frontend_url
 }
+
 
 #                                                         ADAPT_FRONTEND_PORT()
 ###############################################################################
@@ -365,6 +388,7 @@ adapt_frontend_port()
 	sudo sed -i "s/$pattern2/${pattern2:0:-1} -p $port\"/" "$conffile"
 	log_action_end_msg $?
 }
+
 
 #                                                          ADAPT_FRONTEND_URL()
 ###############################################################################
@@ -384,11 +408,78 @@ adapt_frontend_url()
 	log_action_end_msg $?
 }
 
+#                                                           CONFIGURE_BACKEND()
+###############################################################################
+configure_backend()
+{
+	local -r basedir="/var/www/sagesutra"
+	local -r backenddir="backend/cbdbene-backend"
+	local -r envfile=".env"
+	local -r serverurl="https://sagesutra.com"
+	local -r clienturl="https://sagesutra.com"
+	local -r dbusername="admin"
+	local -r dbpassword="admin123"
+	local -r dbhostname="localhost"
+	local -r clientid="936223668088-mg6le6oiabj4qrpj82c28dpj8ctf648d.apps.googleusercontent.com"
+	local -r clientsecret="gWiuvxeJ4mbddARAdIYsnltc"
+	local -r keyid="AKIAJMUJXEIE42GYPGRA"
+	local -r region="us-west-2"
+	local -r accesskey="n45vnKDW053nk+129lnbyEQkZkCVkN8m20Qs6Js2"
+	local -r -i serverport="5003"
+
+	cat <<-EOF | \
+	sudo tee -a "$basedir/$backenddir/$envfile" > /dev/null
+		PORT=$serverport
+		CLIENT_URL="$serverurl"
+		serverurl="$clienturl"
+		MONGOLAB_URI="mongodb+srv://$dbusername:$dbpassword@$dbhostname/test?retryWrites=true&w=majority"
+		GOOGLE_CLIENT_ID=$clientid
+		GOOGLE_CLIENT_SECRET=$clientsecret
+		ACCESSKEYID=$keyid
+		REGION=$region
+		SECRETACCESSKEY=$accesskey
+	EOF
+}
+
+
+#                                                               START_BACKEND()
+###############################################################################
+start_backend()
+{
+	local -r basedir="/var/www/sagesutra"
+	local -r backenddir="backend/cbdbene-backend"
+	local -r curwd="$(pwd)"
+	local -r instance_name="sagesutra-backend"
+
+	cd "$basedir/$backenddir" || return 1
+	log_action_begin_msg "Starting nodejs backend"
+	pm2 start "npm start" -n "$instance_name" 
+	log_action_end_msg $?
+	cd "$curwd" || return 1
+}
+
+#                                                              START_FRONTEND()
+###############################################################################
+start_frontend()
+{
+	local -r basedir="/var/www/sagesutra"
+	local -r frontenddir="frontend/cbdbenev2"
+	local -r curwd="$(pwd)"
+	local -r instance_name="sagesutra-frontend"
+
+	cd "$basedir/$frontenddir" || return 1
+	log_action_begin_msg "Starting nodejs backend"
+	sudo npm run build
+	pm2 start "echo 100500 | sudo -S npm run dev" -n "$instance_name" &
+	log_action_end_msg $?
+	cd "$curwd" || return 1
+}
+
 
 #                                                           REMOVE_CONF_FILES()
 #
 # removes mongodb configuration files
-# only for teesting purposes
+# only for testing purposes
 ###############################################################################
 remove_conf_files()
 {
@@ -416,7 +507,7 @@ remove_conf_files()
 #                                                         REMOVE_INSTALLATION()
 #
 # removes mongodb installation
-# only for teesting purposes
+# only for testing purposes
 ###############################################################################
 remove_installation()
 {
