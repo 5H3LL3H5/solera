@@ -32,8 +32,9 @@ teardown() {
 	run is_apt_package_installed "bash"
 	[ "$status" -eq 0 ]
 }
-@test "is_apt_package_installed(): Call without arguments" {
-	run is_apt_package_installed
+
+@test "is_npm_package_installed(): Call without arguments" {
+	run is_npm_package_installed
 	[ "$status" -eq 1 ]
 }
 
@@ -48,6 +49,7 @@ teardown() {
 }
 
 @test "is_npm_package_installed(): Call with valid and uninstalled package name" {
-	run is_npm_package_installed "no_valid_package_name"
+	run npm install -g pm2
+	run is_npm_package_installed "pm2"
 	[ "$status" -eq 3 ]
 }
