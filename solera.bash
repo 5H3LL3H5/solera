@@ -33,6 +33,7 @@ main()
 	start_backend
 	sleep 3
 	start_frontend
+	generate_selfsigned_cert
 
 	return 0 # exit success
 }
@@ -206,7 +207,8 @@ install_mongodb_package()
 
 	# start MongoDB and add it as a service to be started at boot time
 	log_action_begin_msg "Starting $service"
-	sudo systemctl start "$service" &> /dev/null log_action_end_msg $?
+	sudo systemctl start "$service" &> /dev/null
+	log_action_end_msg $?
 	log_action_begin_msg "Enabling $service"
 	sudo systemctl enable "$service" &> /dev/null
 	log_action_end_msg $?
@@ -356,7 +358,6 @@ install_javascript_dependencies()
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
-
 	return 0
 }
 
@@ -429,7 +430,7 @@ configure_backend()
 	local -r -i serverport="5003"
 
 	cat <<-EOF | \
-	sudo tee -a "$basedir/$backenddir/$envfile" > /dev/null
+	sudo tee -a "$basedir/$backenddir/$envfile" &> /dev/null
 		PORT=$serverport
 		CLIENT_URL="$serverurl"
 		serverurl="$clienturl"
@@ -455,7 +456,7 @@ start_backend()
 
 	cd "$basedir/$backenddir" || return 1
 	log_action_begin_msg "Starting nodejs backend"
-	pm2 start "npm start" -n "$instance_name"
+	pm2 start "npm start" -n "$instance_name" &> /dev/null
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 }
@@ -470,11 +471,43 @@ start_frontend()
 	local -r instance_name="sagesutra-frontend"
 
 	cd "$basedir/$frontenddir" || return 1
-	log_action_begin_msg "Starting nodejs backend"
-	sudo npm run build
-	pm2 start "npm start" -n "$instance_name" &
+	log_action_begin_msg "Building frontend dependencies"
+	sudo npm run build &> /dev/null
+	log_action_end_msg $?
+	log_action_begin_msg "Starting nodejs frontend"
+	pm2 start "npm start" -n "$instance_name" &> /dev/null 
 	log_action_end_msg $?
 	cd "$curwd" || return 1
+}
+
+
+#                                                    GENERATE_SELFSIGNED_CERT()
+###############################################################################
+generate_selfsigned_cert()
+{
+	local -r -i valid_days=365
+	local -r country="US"
+	local -r province="Denial"
+	local -r city="Springfield"
+	local -r organization="Department"
+	local -r cn="www.sagesutra.com"
+
+	install_apt_package openssl
+
+	log_action_begin_msg "Creating self signed certificate"
+	sudo openssl req \
+		-new \
+		-newkey rsa:4096 \
+		-days $valid_days \
+		-nodes \
+		-x509 \
+		-subj "/C=$country/ST=$province/L=$city/O=$organization/CN=$cn" \
+		-keyout "$cn".key \
+		-out "$cn".cert \
+	&> /dev/null
+	log_action_end_msg $?
+
+	return 0
 }
 
 
@@ -520,7 +553,14 @@ remove_installation()
 
 	log_action_begin_msg "Stopping system service $service"
 	sudo systemctl stop "$service";
-	log_action_end_msg $?
+	log_action_end_msg 0 
+
+	log_action_begin_msg "Removing pm2 processes"
+	pm2 delete all &> /dev/null
+	log_action_end_msg 0 
+
+	rm -rf ./*.cert &> /dev/null
+	rm -rf ./*.key &> /dev/null
 
 	if package_installed "$package";
 	then
