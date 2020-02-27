@@ -480,7 +480,7 @@ start_frontend()
 	sudo npm run build &> /dev/null
 	log_action_end_msg $?
 	log_action_begin_msg "Starting nodejs frontend"
-	pm2 start "npm start" -n "$instance_name" &> /dev/null 
+	pm2 start "npm start" -n "$instance_name" &> /dev/null
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 }
@@ -519,7 +519,32 @@ generate_selfsigned_cert()
 ###############################################################################
 setup_nginx()
 {
+	local -r conffile="/etc/nginx/sites-enabled/default"
+
 	install_apt_package nginx-light
+
+	[[ -f "$conffile" ]] && sudo rm "$conffile"
+
+	cat << EOF | sudo tee -a "$conffile" > /dev/null
+	server {
+		listen 80 default_server;
+		listen [::]:80 default_server;
+		root /var/www/html;
+		server_name _;
+		location / {
+			# First attempt to serve request as file, then
+			# as directory, then fall back to displaying a 404.
+			try_files \$uri \$uri/ =404;
+		}
+	}
+
+	server {
+	}
+EOF
+
+	sudo sed -i "s/^\t//" "$conffile"
+
+
 	return 0
 }
 
@@ -566,11 +591,11 @@ remove_installation()
 
 	log_action_begin_msg "Stopping system service $service"
 	sudo systemctl stop "$service";
-	log_action_end_msg 0 
+	log_action_end_msg 0
 
 	log_action_begin_msg "Removing pm2 processes"
 	pm2 delete all &> /dev/null
-	log_action_end_msg 0 
+	log_action_end_msg 0
 
 	rm -rf ./*.cert &> /dev/null
 	rm -rf ./*.key &> /dev/null
