@@ -34,6 +34,7 @@ main()
 	sleep 3
 	start_frontend
 	generate_selfsigned_cert
+	setup_nginx
 
 	return 0 # exit success
 }
@@ -95,12 +96,16 @@ check_config_file()
 install_apt_package()
 {
 	local -r package="$1"
+	local -i status
 
-	if [[ $(package_installed "$package") == 3 ]];
+	package_installed "$package"
+	status=$?
+
+	if (( status == 3 ));
 	then
 		log_action_begin_msg "Installing $package via apt"
 		sudo apt-get -y install "$package" &> /dev/null
-		log_msg_end $?
+		log_end_msg $?
 	fi
 }
 
@@ -119,7 +124,7 @@ install_npm_package()
 	then
 		log_action_begin_msg "Installing $package via npm"
 		sudo npm install -g "$package" &> /dev/null
-		log_msg_end $?
+		log_end_msg $?
 	fi
 }
 
@@ -510,6 +515,14 @@ generate_selfsigned_cert()
 	return 0
 }
 
+#                                                                 SETUP_NGINX()
+###############################################################################
+setup_nginx()
+{
+	install_apt_package nginx-light
+	return 0
+}
+
 
 #                                                           REMOVE_CONF_FILES()
 #
@@ -597,7 +610,7 @@ then
 	if ! main "$@";
 	then
 		log_begin_msg "Script error"
-		log_msg_end 1
+		log_end_msg 1
 		exit 1
 	fi
 
