@@ -9,6 +9,9 @@
 # tabstops=4	/ set ts=4
 # shiftwidth=4	/ set sw=4
 
+declare fqdn="www.sagesutra2.com"
+declare sld=${fqdn#www.}			# sagesutra2.com
+declare domainlabel=${sld%.*}		# sagesutra2
 
 #                                                                        MAIN()
 #
@@ -18,10 +21,15 @@ main()
 {
 	local -r package="mongodb-org"
 
-	if ! package_installed "$package";
+	# ONLY IN DEV
+	remove_installation
+
+	install_package_dependencies
+
+	if ! is_apt_package_installed "$package";
 	then
 		install_mongodb_package "$package"
-		initial_setup
+		setup_mongo_database
 	fi
 
 	create_www_folders
@@ -29,9 +37,7 @@ main()
 	install_javascript_dependencies
 	configure_frontend
 	configure_backend
-	sleep 3
 	start_backend
-	sleep 3
 	start_frontend
 	generate_selfsigned_cert
 	setup_nginx
@@ -40,9 +46,48 @@ main()
 }
 
 
-#                                                           PACKAGE_INSTALLED()
+#                                                           CHECK_CONFIG_FILE()
 #
-# verifies package installation
+# checks config file syntax
+###############################################################################
+check_config_file()
+{
+	return 0	      # exit success
+}
+
+#                                                INSTALL_PACKAGE_DEPENDENCIES()
+#
+# installs required packages
+###############################################################################
+install_package_dependencies()
+{
+	local -r nginx_flavour="light"
+
+	local -r viaapt="git nginx-$nginx_flavour sed npm coreutils systemd
+	                 init-system-helpers openssl"
+	local -r vianpm="pm2"
+
+	local package
+
+	log_action_begin_msg "Updating apt database"
+	sudo apt-get update &> /dev/null
+	log_action_end_msg $?
+
+	for package in $viaapt;
+	do
+		install_apt_package "$package"
+	done
+
+	for package in $vianpm;
+	do
+		install_npm_package "$package"
+	done
+}
+
+
+#                                                    IS_APT_PACKAGE_INSTALLED()
+#
+# verifies installation of apt package
 #
 # @param[in]	package		package name
 # @param[out]	0			package installed
@@ -50,7 +95,7 @@ main()
 # @param[out]	2			empty or invalid package name
 # @param[out]	3			package not installed
 ###############################################################################
-package_installed()
+is_apt_package_installed()
 {
 	local -r package="$1"
 
@@ -76,14 +121,40 @@ package_installed()
 	return 0                    # package already installed
 }
 
-
-#                                                           CHECK_CONFIG_FILE()
+#                                                    IS_NPM_PACKAGE_INSTALLED()
 #
-# checks config file syntax
+# verifies installation of npm package
+#
+# @param[in]	package		package name
+# @param[out]	0			package installed
+# @param[out]	1			invalid function usage
+# @param[out]	2			empty or invalid package name
+# @param[out]	3			package not installed
 ###############################################################################
-check_config_file()
+is_npm_package_installed()
 {
-	return 0	      # exit success
+	local -r package="$1"
+
+	# check if one parameter was passed
+	if (( $# != 1 ));
+	then
+		log_failure_msg "Invalid function call"
+		return 1
+	fi
+
+	# check if package specifier empty or only contains spaces
+	if [[ -z "${package// }" ]];
+	then
+		log_failure_msg "Invalid package specifier"
+		return 2                # invalid package name
+	fi
+
+	if ! npm list -g "$package" &> /dev/null;
+	then
+		return 3                # package not installed
+	fi
+
+	return 0                    # package already installed
 }
 
 
@@ -96,12 +167,8 @@ check_config_file()
 install_apt_package()
 {
 	local -r package="$1"
-	local -i status
 
-	package_installed "$package"
-	status=$?
-
-	if (( status == 3 ));
+	if ! is_apt_package_installed "$package";
 	then
 		log_action_begin_msg "Installing $package via apt"
 		sudo apt-get -y install "$package" &> /dev/null
@@ -120,7 +187,7 @@ install_npm_package()
 {
 	local -r package="$1"
 
-	if ! npm list -g "$package" &> /dev/null;
+	if ! is_npm_package_installed "$package";
 	then
 		log_action_begin_msg "Installing $package via npm"
 		sudo npm install -g "$package" &> /dev/null
@@ -131,7 +198,7 @@ install_npm_package()
 
 #                                                      INSTALL_MOGODB_PACKAGE()
 #
-# installs database package
+# installs mongodb package
 # source: https://www.howtoforge.com/tutorial/install-mongodb-on-ubuntu-16.04
 ###############################################################################
 install_mongodb_package()
@@ -233,11 +300,11 @@ install_mongodb_package()
 }
 
 
-#                                                            INITIAL_DB_SETUP()
+#                                                        SETUP_MONGO_DATABASE()
 #
 # inital database setup
 ###############################################################################
-initial_setup()
+setup_mongo_database()
 {
 	local -r username="admin"
 	local -r password="admin123"
@@ -278,7 +345,7 @@ initial_setup()
 	sudo service "$service" restart
 	log_action_end_msg $?
 
-	return 0	      # exit success
+	return 0
 }
 
 
@@ -286,7 +353,7 @@ initial_setup()
 ###############################################################################
 create_www_folders()
 {
-	local -r basedir="/var/www/sagesutra"
+	local -r basedir="/var/www/$domainlabel"
 	local -r backenddir="backend"
 	local -r frontenddir="frontend"
 
@@ -316,7 +383,7 @@ create_www_folders()
 ###############################################################################
 clone_git_reps()
 {
-	local -r basedir="/var/www/sagesutra"
+	local -r basedir="/var/www/$domainlabel"
 	local -r backenddir="backend"
 	local -r backenduri="https://github.com/Anas-MI/cbdbene-backend.git"
 	local -r frontenddir="frontend"
@@ -342,26 +409,27 @@ clone_git_reps()
 ###############################################################################
 install_javascript_dependencies()
 {
-	local -r basedir="/var/www/sagesutra"
+	local -r basedir="/var/www/$domainlabel"
 	local -r backenddir="backend/cbdbene-backend"
 	local -r frontenddir="frontend/cbdbenev2"
 
 	local -r curwd="$(pwd)"
 
-	install_apt_package npm
-	install_npm_package pm2
-
-	cd "$basedir/$frontenddir" || return 1
 	log_action_begin_msg "Install js deps"
+	cd "$basedir/$frontenddir" || return 1
 	sudo npm install --unsafe-perm &> /dev/null
-	log_action_end_msg $?
 	cd "$curwd" || return 1
 
 	cd "$basedir/$backenddir" || return 1
-	log_action_begin_msg "Install js deps"
 	sudo npm install --unsafe-perm &> /dev/null
-	log_action_end_msg $?
 	cd "$curwd" || return 1
+	log_action_end_msg 0
+
+	log_action_begin_msg "Building frontend dependencies"
+	cd "$basedir/$frontenddir" || return 1
+	sudo npm run build &> /dev/null
+	cd "$curwd" || return 1
+	log_action_end_msg $?
 
 	return 0
 }
@@ -383,7 +451,7 @@ adapt_frontend_port()
 	local -i port=3007
 	local -r pattern1='"dev": "next dev"'
 	local -r pattern2='"start": "next start"'
-	local -r basedir="/var/www/sagesutra"
+	local -r basedir="/var/www/$domainlabel"
 	local -r frontenddir="frontend/cbdbenev2"
 	local -r conffile="$basedir/$frontenddir/package.json"
 
@@ -398,13 +466,13 @@ adapt_frontend_port()
 ###############################################################################
 adapt_frontend_url()
 {
-	local -r basedir="/var/www/sagesutra"
+	local -r basedir="/var/www/$domainlabel"
 	local -r frontenddir="frontend/cbdbenev2"
 	local -r conffile="$basedir/$frontenddir/constants/projectSettings.js"
 
 	local -r pattern1="export const baseUrl"
 	local -r pattern2="admin.cbdbene.com"
-	local -r url="admin.sagesutra.com"
+	local -r url="admin.$domainlabel.com"
 
 	log_action_begin_msg "Adapting frontend url"
 	sudo sed -i "s/^\($pattern1.*= \).*$/\1\"https:\/\/$url\";/" "$conffile"
@@ -416,11 +484,11 @@ adapt_frontend_url()
 ###############################################################################
 configure_backend()
 {
-	local -r basedir="/var/www/sagesutra"
+	local -r basedir="/var/www/$domainlabel"
 	local -r backenddir="backend/cbdbene-backend"
 	local -r envfile=".env"
-	local -r serverurl="https://sagesutra.com"
-	local -r clienturl="https://sagesutra.com"
+	local -r serverurl="https://$domainlabel.com"
+	local -r clienturl="https://$domainlabel.com"
 	local -r dbname="admin"
 	local -r dbusername="admin"
 	local -r dbpassword="admin123"
@@ -432,7 +500,7 @@ configure_backend()
 	local -r region="us-west-2"
 	local -r accesskey="n45vnKDW053nk+129lnbyEQkZkCVkN8m20Qs6Js2"
 	local -r bucket="new-maxxbio"
-	local -r -i serverport="5003"
+	local -r -i serverport=5003
 
 	cat <<-EOF | \
 	sudo tee -a "$basedir/$backenddir/$envfile" &> /dev/null
@@ -454,15 +522,16 @@ configure_backend()
 ###############################################################################
 start_backend()
 {
-	local -r basedir="/var/www/sagesutra"
+	local -r basedir="/var/www/$domainlabel"
 	local -r backenddir="backend/cbdbene-backend"
 	local -r curwd="$(pwd)"
-	local -r instance_name="sagesutra-backend"
+	local -r instance_name="$domainlabel-backend"
 
 	cd "$basedir/$backenddir" || return 1
 	log_action_begin_msg "Starting nodejs backend"
 	pm2 start "npm start" -n "$instance_name" &> /dev/null
 	log_action_end_msg $?
+	sleep 3
 	cd "$curwd" || return 1
 }
 
@@ -470,18 +539,16 @@ start_backend()
 ###############################################################################
 start_frontend()
 {
-	local -r basedir="/var/www/sagesutra"
+	local -r basedir="/var/www/$domainlabel"
 	local -r frontenddir="frontend/cbdbenev2"
 	local -r curwd="$(pwd)"
-	local -r instance_name="sagesutra-frontend"
+	local -r instance_name="$domainlabel-frontend"
 
 	cd "$basedir/$frontenddir" || return 1
-	log_action_begin_msg "Building frontend dependencies"
-	sudo npm run build &> /dev/null
-	log_action_end_msg $?
 	log_action_begin_msg "Starting nodejs frontend"
 	pm2 start "npm start" -n "$instance_name" &> /dev/null
 	log_action_end_msg $?
+	sleep 3
 	cd "$curwd" || return 1
 }
 
@@ -494,10 +561,16 @@ generate_selfsigned_cert()
 	local -r country="US"
 	local -r province="Denial"
 	local -r city="Springfield"
-	local -r organization="Department"
-	local -r cn="www.sagesutra.com"
+	local -r o="Organisation"
+	local -r ou="Department"
+	local -r domain="$domainlabel.com"
+	local -r cn="www.$domain"
+	local -r certpath="/etc/letsencrypt/live/$domain"
 
-	install_apt_package openssl
+	if [[ ! -d "$certpath" ]];
+	then
+		sudo mkdir -p "$certpath"
+	fi
 
 	log_action_begin_msg "Creating self signed certificate"
 	sudo openssl req \
@@ -506,9 +579,9 @@ generate_selfsigned_cert()
 		-days $valid_days \
 		-nodes \
 		-x509 \
-		-subj "/C=$country/ST=$province/L=$city/O=$organization/CN=$cn" \
-		-keyout "$cn".key \
-		-out "$cn".cert \
+		-subj "/C=$country/ST=$province/L=$city/O=$o/OU=$ou/CN=$cn" \
+		-keyout "$certpath/privkey.pem" \
+		-out "$certpath/fullchain.pem" \
 	&> /dev/null
 	log_action_end_msg $?
 
@@ -519,31 +592,77 @@ generate_selfsigned_cert()
 ###############################################################################
 setup_nginx()
 {
-	local -r conffile="/etc/nginx/sites-enabled/default"
+	local -r domain="$domainlabel.com"
+	local -r conffile="/etc/nginx/sites-enabled/$domain"
+	local -r certpath="/etc/letsencrypt/live/$domain"
+	local -r nginx_flavour="light"
+	local -r -i frontend_port=3007
+	local -r -i backend_port=5003
 
-	install_apt_package nginx-light
+	log_action_begin_msg "Configure and restart webserver"
 
 	[[ -f "$conffile" ]] && sudo rm "$conffile"
 
 	cat << EOF | sudo tee -a "$conffile" > /dev/null
 	server {
-		listen 80 default_server;
-		listen [::]:80 default_server;
-		root /var/www/html;
-		server_name _;
+		listen 80;
+		server_name $domain www.$domain;
 		location / {
-			# First attempt to serve request as file, then
-			# as directory, then fall back to displaying a 404.
-			try_files \$uri \$uri/ =404;
+			return 301 https://\$host\$request_uri;
 		}
 	}
 
 	server {
+		listen 443 ssl;
+		listen [::]:443 ssl ;
+		ssl_certificate $certpath/fullchain.pem;
+		ssl_certificate_key $certpath/privkey.pem;
+		server_name $domain www.$domain;
+		location / {
+			proxy_pass http://localhost:$frontend_port;
+			proxy_http_version 1.1;
+			proxy_set_header Upgrade \$http_upgrade;
+			proxy_set_header Connection 'upgrade';
+			proxy_set_header Host \$host;
+			proxy_cache_bypass \$http_upgrade;
+		}
+	}
+
+	server {
+		listen 80;
+		server_name admin.$domain;
+		location / {
+			return 301 https://\$host\$request_uri;
+		}
+	}
+
+	# Point backend domain name to port
+	server {
+		listen 443 ssl;
+		ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;
+		ssl_certificate_key /etc/letsencrypt/live/$domain/privkey.pem;
+		index index.html index.htm index.nginx-debian.html;
+		server_name admin.$domain;
+		location / {
+			proxy_pass http://localhost:$backend_port;
+			proxy_http_version 1.1;
+			proxy_set_header Upgrade \$http_upgrade;
+			proxy_set_header Connection 'upgrade';
+			proxy_set_header Host \$host;
+		}
 	}
 EOF
 
 	sudo sed -i "s/^\t//" "$conffile"
 
+	# adapt /etc/host since no access to dns server
+	sudo sed -i \
+		"s/\(^127\.0\.0\.1.*localhost \).*$/\1 $domain admin.$domain/"\
+		/etc/hosts
+
+	sudo service nginx restart &> /dev/null
+
+	log_end_msg 0
 
 	return 0
 }
@@ -574,6 +693,8 @@ remove_conf_files()
 		sudo rm "$mongo_service_dir/$mongo_service_fn"
 		log_action_end_msg $?
 	fi
+
+	return 0
 }
 
 
@@ -587,7 +708,7 @@ remove_installation()
 	local -r service="mongod"
 	local -r package="mongodb-org"
 	local -r mongodb_version="4.2"
-	local -r basedir="/var/www/sagesutra"
+	local -r basedir="/var/www/$domainlabel"
 
 	log_action_begin_msg "Stopping system service $service"
 	sudo systemctl stop "$service";
@@ -600,7 +721,7 @@ remove_installation()
 	rm -rf ./*.cert &> /dev/null
 	rm -rf ./*.key &> /dev/null
 
-	if package_installed "$package";
+	if is_apt_package_installed "$package";
 	then
 		log_action_begin_msg "Deinstalling $package"
 		sudo apt -y purge "$package" &> /dev/null
@@ -610,6 +731,8 @@ remove_installation()
 	sudo rm -rf "$basedir"
 
 	remove_conf_files
+
+	return 0
 }
 
 
@@ -627,9 +750,6 @@ then
 		exit 1
 	fi
 	. /lib/lsb/init-functions
-
-	# ONLY IN DEV
-	remove_installation
 
 	# pass whole parameter list to main
 	if ! main "$@";
