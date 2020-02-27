@@ -29,9 +29,9 @@ main()
 	install_javascript_dependencies
 	configure_frontend
 	configure_backend
-	sleep 1
+	sleep 3
 	start_backend
-	sleep 1
+	sleep 3
 	start_frontend
 
 	return 0 # exit success
@@ -249,8 +249,8 @@ initial_setup()
 		db=db.getSiblingDB(\"$db\");
 		db.createUser({
 		user:\"$username\", \
-			pwd:\"$password\", \
-			roles:[{role:'root', db:'$db'}]
+		pwd:\"$password\", \
+		roles:[{role:'root', db:'$db'}]
 	})" &> /dev/null
 	log_action_end_msg $?
 
@@ -346,15 +346,13 @@ install_javascript_dependencies()
 
 	cd "$basedir/$frontenddir" || return 1
 	log_action_begin_msg "Install js deps"
-	# Todo: logfile
-	sudo npm install &> /dev/null
+	sudo npm install --unsafe-perm &> /dev/null
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
 	cd "$basedir/$backenddir" || return 1
 	log_action_begin_msg "Install js deps"
-	# Todo: logfile
-	sudo npm install &> /dev/null
+	sudo npm install --unsafe-perm &> /dev/null
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
@@ -417,14 +415,17 @@ configure_backend()
 	local -r envfile=".env"
 	local -r serverurl="https://sagesutra.com"
 	local -r clienturl="https://sagesutra.com"
+	local -r dbname="admin"
 	local -r dbusername="admin"
 	local -r dbpassword="admin123"
 	local -r dbhostname="localhost"
+	local -r -i dbport=27017
 	local -r clientid="936223668088-mg6le6oiabj4qrpj82c28dpj8ctf648d.apps.googleusercontent.com"
 	local -r clientsecret="gWiuvxeJ4mbddARAdIYsnltc"
 	local -r keyid="AKIAJMUJXEIE42GYPGRA"
 	local -r region="us-west-2"
 	local -r accesskey="n45vnKDW053nk+129lnbyEQkZkCVkN8m20Qs6Js2"
+	local -r bucket="new-maxxbio"
 	local -r -i serverport="5003"
 
 	cat <<-EOF | \
@@ -432,12 +433,13 @@ configure_backend()
 		PORT=$serverport
 		CLIENT_URL="$serverurl"
 		serverurl="$clienturl"
-		MONGOLAB_URI="mongodb+srv://$dbusername:$dbpassword@$dbhostname/test?retryWrites=true&w=majority"
+		MONGOLAB_URI="mongodb://$dbusername:$dbpassword@$dbhostname:$dbport/$dbname?retryWrites=true&w=majority"
 		GOOGLE_CLIENT_ID=$clientid
 		GOOGLE_CLIENT_SECRET=$clientsecret
 		ACCESSKEYID=$keyid
 		REGION=$region
 		SECRETACCESSKEY=$accesskey
+		BUCKET=$bucket
 	EOF
 }
 
@@ -453,7 +455,7 @@ start_backend()
 
 	cd "$basedir/$backenddir" || return 1
 	log_action_begin_msg "Starting nodejs backend"
-	pm2 start "npm start" -n "$instance_name" 
+	pm2 start "npm start" -n "$instance_name"
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 }
@@ -470,7 +472,7 @@ start_frontend()
 	cd "$basedir/$frontenddir" || return 1
 	log_action_begin_msg "Starting nodejs backend"
 	sudo npm run build
-	pm2 start "echo 100500 | sudo -S npm run dev" -n "$instance_name" &
+	pm2 start "npm start" -n "$instance_name" &
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 }
