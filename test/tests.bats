@@ -14,7 +14,7 @@ teardown() {
 }
 
 @test "is_apt_package_installed(): Call with more than one arguments" {
-	run is_apt_package_installed "parameter1" "parameter2"
+	run is_apt_package_installed parameter1 parameter2
 	[ "$status" -eq 1 ]
 }
 
@@ -24,12 +24,14 @@ teardown() {
 }
 
 @test "is_apt_package_installed(): Call with valid and uninstalled package name" {
-	run is_apt_package_installed "no_valid_package_name"
+	run sudo apt-get purge htop 
+	run is_apt_package_installed htop
 	[ "$status" -eq 3 ]
 }
 
 @test "is_apt_package_installed(): Call with valid and installed package name" {
-	run is_apt_package_installed "bash"
+	run install_apt_package htop
+	run is_apt_package_installed htop 
 	[ "$status" -eq 0 ]
 }
 
@@ -39,7 +41,7 @@ teardown() {
 }
 
 @test "is_npm_package_installed(): Call with more than one arguments" {
-	run is_npm_package_installed "parameter1" "parameter2"
+	run is_npm_package_installed parameter1 parameter2
 	[ "$status" -eq 1 ]
 }
 
@@ -49,12 +51,13 @@ teardown() {
 }
 
 @test "is_npm_package_installed(): Call with valid and uninstalled package name" {
-	run is_npm_package_installed "pm2"
+	run sudo npm uninstall -g pm2
+	run is_npm_package_installed pm2
 	[ "$status" -eq 3 ]
 }
 
 @test "is_npm_package_installed(): Call with valid and installed package name" {
-	run npm install -g pm2
-	run is_npm_package_installed "pm2"
+	run install_npm_package pm2 
+	run is_npm_package_installed pm2
 	[ "$status" -eq 0 ]
 }
