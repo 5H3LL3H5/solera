@@ -9,7 +9,7 @@
 # tabstops=4	/ set ts=4
 # shiftwidth=4	/ set sw=4
 
-declare fqdn="www.sagesutra2.com"
+declare fqdn="www.cstenzel.com"
 declare sld=${fqdn#www.}			# sagesutra2.com
 declare domainlabel=${sld%.*}		# sagesutra2
 
@@ -64,7 +64,7 @@ install_package_dependencies()
 	local -r nginx_flavour="light"
 
 	local -r viaapt="git nginx-$nginx_flavour sed npm coreutils systemd
-	                 init-system-helpers openssl"
+	                 init-system-helpers openssl gnupg wget"
 	local -r vianpm="pm2"
 
 	local package
@@ -199,14 +199,12 @@ install_npm_package()
 #                                                      INSTALL_MOGODB_PACKAGE()
 #
 # installs mongodb package
-# source: https://www.howtoforge.com/tutorial/install-mongodb-on-ubuntu-16.04
+# see https://docs.mongodb.com/manual/tutorial/install-mongodb-on-ubuntu
 ###############################################################################
 install_mongodb_package()
 {
-	local -r mongodb_version="4.2"
-	local -r keyserver="hkp://keyserver.ubuntu.com"
 	local -r -i port=80
-
+	local -r mongodb_version="4.2"
 	local -r lsb_release_name=$(lsb_release -sc)
 	local -r apt_source_fn="mongodb-org-$mongodb_version.list"
 	local -r apt_source_dir="/etc/apt/sources.list.d/"
@@ -216,30 +214,27 @@ install_mongodb_package()
 
 	local -r package="$1"
 
-	local keyid="INVALID"
-
 	# remove artefacts from previous installations
 	remove_conf_files
 
-	# handle different ubuntu releases
-	case "$lsb_release_name" in
-		"xenial")
-			keyid="E52529D4"
-			;;
-		"bionic")
-			keyid="4B7C549A058F8B6B"
-			;;
-		*)
-			log_failure_msg "Invalid OS"
-			exit 1
-	esac
+	# create log and lib dir
+	if [[ ! -d /var/log/mongodb ]];
+	then
+		sudo mkdir -p /var/log/mongodb &> /dev/null
+		sudo chown mongodb:mongodb /var/log/mongodb &> /dev/null
+	fi
 
-	# start installation
+	if [[ ! -d /var/lib/mongodb ]];
+	then
+		sudo mkdir -p /var/lib/mongodb &> /dev/null
+		sudo chown mongodb:mongodb /var/lib/mongodb &> /dev/null
+	fi
 
-	# add keyserver
-	log_action_begin_msg "Adding keyserver"
-	sudo apt-key adv --keyserver "$keyserver:$port" --recv "$keyid" \
-		&> /dev/null
+	# import public key
+	log_action_begin_msg "Import MongoDB public gpg key" 
+	wget -qO - \
+		https://www.mongodb.org/static/pgp/server-"$mongodb_version".asc | \
+		sudo apt-key add - &> /dev/null
 	log_action_end_msg $?
 
 	# create MongoDB list file in /etc/apt/sources.list.d
@@ -254,6 +249,13 @@ install_mongodb_package()
 	sudo apt-get update &> /dev/null
 	log_action_end_msg $?
 	install_apt_package "$package"
+
+	# pins current mongodb version
+	echo "mongodb-org hold" | sudo dpkg --set-selections
+	echo "mongodb-org-server hold" | sudo dpkg --set-selections
+	echo "mongodb-org-shell hold" | sudo dpkg --set-selections
+	echo "mongodb-org-mongos hold" | sudo dpkg --set-selections
+	echo "mongodb-org-tools hold" | sudo dpkg --set-selections
 
 	# create mongo db system service
 	cat <<-EOF | \
@@ -418,6 +420,7 @@ install_javascript_dependencies()
 	log_action_begin_msg "Install js deps"
 	cd "$basedir/$frontenddir" || return 1
 	sudo npm install --unsafe-perm &> /dev/null
+	sudo npm update --unsafe-perm &> /dev/null
 	cd "$curwd" || return 1
 
 	cd "$basedir/$backenddir" || return 1
@@ -724,7 +727,9 @@ remove_installation()
 	if is_apt_package_installed "$package";
 	then
 		log_action_begin_msg "Deinstalling $package"
-		sudo apt -y purge "$package" &> /dev/null
+		[[ -d /var/log/mongodb ]] && sudo rm -r /var/log/mongodb &> /dev/null
+		[[ -d /var/lib/mongodb ]] && sudo rm -r /var/lib/mongodb &> /dev/null
+		sudo apt -y --allow-change-held-packages purge "$package" &> /dev/null
 		log_action_end_msg $?
 	fi
 
