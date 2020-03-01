@@ -63,8 +63,8 @@ install_package_dependencies()
 {
 	local -r nginx_flavour="light"
 
-	local -r viaapt="git nginx-$nginx_flavour sed npm coreutils systemd
-	                 init-system-helpers openssl gnupg wget"
+	local -r viaapt="git nginx-$nginx_flavour sed coreutils systemd
+	                 init-system-helpers openssl gnupg wget nodejs"
 	local -r vianpm="pm2"
 
 	local package
@@ -417,22 +417,24 @@ install_javascript_dependencies()
 
 	local -r curwd="$(pwd)"
 
-	log_action_begin_msg "Install js deps"
+	log_action_begin_msg "Install frontend dependencies"
 	cd "$basedir/$frontenddir" || return 1
-	sudo npm install --unsafe-perm &> /dev/null
-	sudo npm update --unsafe-perm &> /dev/null
+	sudo npm update  --production --unsafe-perm &> /dev/null
+	log_action_end_msg $?
 	cd "$curwd" || return 1
 
+	log_action_begin_msg "Install backend dependencies"
 	cd "$basedir/$backenddir" || return 1
-	sudo npm install --unsafe-perm &> /dev/null
+	sudo npm update  --production --unsafe-perm &> /dev/null
+	log_action_end_msg $?
 	cd "$curwd" || return 1
-	log_action_end_msg 0
 
 	log_action_begin_msg "Building frontend dependencies"
 	cd "$basedir/$frontenddir" || return 1
-	sudo npm run build &> /dev/null
-	cd "$curwd" || return 1
+	# in case insufficient ram repeat build til successful
+	while ! sudo npm run build &> /dev/null; do :; done
 	log_action_end_msg $?
+	cd "$curwd" || return 1
 
 	return 0
 }
