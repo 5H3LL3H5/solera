@@ -231,7 +231,7 @@ install_mongodb_package()
 	fi
 
 	# import public key
-	log_action_begin_msg "Import MongoDB public gpg key" 
+	log_action_begin_msg "Import MongoDB public gpg key"
 	wget -qO - \
 		https://www.mongodb.org/static/pgp/server-"$mongodb_version".asc | \
 		sudo apt-key add - &> /dev/null
@@ -364,6 +364,7 @@ create_www_folders()
 	if [[ ! -d "$basedir/$backenddir" ]];
 	then
 		sudo mkdir -p "$basedir/$backenddir"
+		sudo chown -R "$USER:$(id --group --name)" "$basedir/$backenddir"
 	else
 		# what to do here ? -> test if content is gitdir and has correct origin
 		# then git pull
@@ -373,6 +374,7 @@ create_www_folders()
 	if [[ ! -d "$basedir/$frontenddir" ]];
 	then
 		sudo mkdir -p "$basedir/$frontenddir"
+		sudo chown -R "$USER:$(id --group --name)" "$basedir/$frontenddir"
 	else
 		# what to do here ? -> test if content is gitdir and has correct origin
 		# then git pull
@@ -394,14 +396,14 @@ clone_git_reps()
 	log_action_begin_msg "Cloning backend"
 	if [[ -d "$basedir/$backenddir" ]];
 	then
-		sudo git -C "$basedir/$backenddir" clone "$backenduri" &> /dev/null
+		git -C "$basedir/$backenddir" clone "$backenduri" &> /dev/null
 	fi
 	log_action_end_msg $?
 
 	log_action_begin_msg "Cloning frontend"
 	if [[ -d "$basedir/$frontenddir" ]];
 	then
-		sudo git -C "$basedir/$frontenddir" clone "$frontenduri" &> /dev/null
+		git -C "$basedir/$frontenddir" clone "$frontenduri" &> /dev/null
 	fi
 	log_action_end_msg $?
 }
@@ -416,23 +418,40 @@ install_javascript_dependencies()
 	local -r frontenddir="frontend/cbdbenev2"
 
 	local -r curwd="$(pwd)"
+	local -r -i max_runs=10
+	local -i successful_build=1
 
 	log_action_begin_msg "Install frontend dependencies"
 	cd "$basedir/$frontenddir" || return 1
-	sudo npm update  --production --unsafe-perm &> /dev/null
+	npm update &> /dev/null
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
 	log_action_begin_msg "Install backend dependencies"
 	cd "$basedir/$backenddir" || return 1
-	sudo npm update  --production --unsafe-perm &> /dev/null
+	npm update &> /dev/null
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
 	log_action_begin_msg "Building frontend dependencies"
 	cd "$basedir/$frontenddir" || return 1
 	# in case insufficient ram repeat build til successful
-	while ! sudo npm run build &> /dev/null; do :; done
+	for (( i=1; i<=max_runs; i++));
+	do
+		if npm run build;
+		then
+			echo "BUILD SUCCESS AFTER $i runs"
+			successful_build=0
+			break;
+		fi
+	done
+
+	if (( successful_build != 0 ));
+	then
+		log_failure_msg "Unable to build frontend. Give up."
+		exit 1
+	fi
+
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
@@ -461,8 +480,8 @@ adapt_frontend_port()
 	local -r conffile="$basedir/$frontenddir/package.json"
 
 	log_action_begin_msg "Adapting frontend port"
-	sudo sed -i "s/$pattern1/${pattern1:0:-1} -p $port\"/" "$conffile"
-	sudo sed -i "s/$pattern2/${pattern2:0:-1} -p $port\"/" "$conffile"
+	sed -i "s/$pattern1/${pattern1:0:-1} -p $port\"/" "$conffile"
+	sed -i "s/$pattern2/${pattern2:0:-1} -p $port\"/" "$conffile"
 	log_action_end_msg $?
 }
 
@@ -480,8 +499,8 @@ adapt_frontend_url()
 	local -r url="admin.$domainlabel.com"
 
 	log_action_begin_msg "Adapting frontend url"
-	sudo sed -i "s/^\($pattern1.*= \).*$/\1\"https:\/\/$url\";/" "$conffile"
-	sudo sed -i "s/$pattern2/$url/" "$conffile"
+	sed -i "s/^\($pattern1.*= \).*$/\1\"http:\/\/$url\";/" "$conffile"
+	sed -i "s/$pattern2/$url/" "$conffile"
 	log_action_end_msg $?
 }
 
@@ -507,8 +526,7 @@ configure_backend()
 	local -r bucket="new-maxxbio"
 	local -r -i serverport=5003
 
-	cat <<-EOF | \
-	sudo tee -a "$basedir/$backenddir/$envfile" &> /dev/null
+	cat <<-EOF > "$basedir/$backenddir/$envfile"
 		PORT=$serverport
 		CLIENT_URL="$serverurl"
 		serverurl="$clienturl"
@@ -598,7 +616,8 @@ generate_selfsigned_cert()
 setup_nginx()
 {
 	local -r domain="$domainlabel.com"
-	local -r conffile="/etc/nginx/sites-enabled/$domain"
+	local -r conffile="/etc/nginx/sites-available/$domain"
+	local -r symlink="/etc/nginx/sites-enabled/$domain"
 	local -r certpath="/etc/letsencrypt/live/$domain"
 	local -r nginx_flavour="light"
 	local -r -i frontend_port=3007
@@ -607,6 +626,7 @@ setup_nginx()
 	log_action_begin_msg "Configure and restart webserver"
 
 	[[ -f "$conffile" ]] && sudo rm "$conffile"
+	[[ -e "$symlink" ]] && sudo rm "$symlink"
 
 	cat << EOF | sudo tee -a "$conffile" > /dev/null
 	server {
@@ -644,8 +664,8 @@ setup_nginx()
 	# Point backend domain name to port
 	server {
 		listen 443 ssl;
-		ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;
-		ssl_certificate_key /etc/letsencrypt/live/$domain/privkey.pem;
+		ssl_certificate $certpath/fullchain.pem;
+		ssl_certificate_key $certpath/privkey.pem;
 		index index.html index.htm index.nginx-debian.html;
 		server_name admin.$domain;
 		location / {
@@ -654,6 +674,7 @@ setup_nginx()
 			proxy_set_header Upgrade \$http_upgrade;
 			proxy_set_header Connection 'upgrade';
 			proxy_set_header Host \$host;
+			proxy_cache_bypass \$http_upgrade;
 		}
 	}
 EOF
@@ -664,6 +685,8 @@ EOF
 	sudo sed -i \
 		"s/\(^127\.0\.0\.1.*localhost \).*$/\1 $domain admin.$domain/"\
 		/etc/hosts
+
+	sudo ln -s "$conffile" "$symlink"
 
 	sudo service nginx restart &> /dev/null
 
