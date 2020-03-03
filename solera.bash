@@ -37,10 +37,19 @@ main()
 	install_javascript_dependencies
 	configure_frontend
 	configure_backend
+    build_frontend
 	start_backend
 	start_frontend
-	generate_selfsigned_cert
+	#generate_selfsigned_cert
 	setup_nginx
+
+    # install certificates via letscert
+    sudo certbot --nginx --register-unsafely-without-email < <(echo 1 2 3; echo 1; echo 2)
+
+    # install startup scripts
+    pm2 save
+    bash -c "$(pm2 startup | tail -n 1)"
+
 
 	return 0 # exit success
 }
@@ -418,8 +427,6 @@ install_javascript_dependencies()
 	local -r frontenddir="frontend/cbdbenev2"
 
 	local -r curwd="$(pwd)"
-	local -r -i max_runs=10
-	local -i successful_build=1
 
 	log_action_begin_msg "Install frontend dependencies"
 	cd "$basedir/$frontenddir" || return 1
@@ -430,28 +437,6 @@ install_javascript_dependencies()
 	log_action_begin_msg "Install backend dependencies"
 	cd "$basedir/$backenddir" || return 1
 	npm update &> /dev/null
-	log_action_end_msg $?
-	cd "$curwd" || return 1
-
-	log_action_begin_msg "Building frontend dependencies"
-	cd "$basedir/$frontenddir" || return 1
-	# in case insufficient ram repeat build til successful
-	for (( i=1; i<=max_runs; i++));
-	do
-		if npm run build;
-		then
-			echo "BUILD SUCCESS AFTER $i runs"
-			successful_build=0
-			break;
-		fi
-	done
-
-	if (( successful_build != 0 ));
-	then
-		log_failure_msg "Unable to build frontend. Give up."
-		exit 1
-	fi
-
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
@@ -495,14 +480,54 @@ adapt_frontend_url()
 	local -r conffile="$basedir/$frontenddir/constants/projectSettings.js"
 
 	local -r pattern1="export const baseUrl"
-	local -r pattern2="admin.cbdbene.com"
-	local -r url="admin.$domainlabel.com"
+	local -r pattern2="https:\/\/admin.cbdbene.com"
+	local -r httpsurl="https:\/\/admin.$domainlabel.com"
+	local -r httpurl="http:\/\/admin.$domainlabel.com"
 
 	log_action_begin_msg "Adapting frontend url"
-	sed -i "s/^\($pattern1.*= \).*$/\1\"http:\/\/$url\";/" "$conffile"
-	sed -i "s/$pattern2/$url/" "$conffile"
+	sed -i "s/^\($pattern1.*= \).*$/\1\"$httpsurl\";/" "$conffile" \
+      &> /dev/null
+	sed -i "s/$pattern2/$httpurl/" "$conffile" &> /dev/null
 	log_action_end_msg $?
 }
+
+
+#                                                              BUILD_FRONTEND()
+###############################################################################
+build_frontend()
+{
+	local -r basedir="/var/www/$domainlabel"
+	local -r frontenddir="frontend/cbdbenev2"
+
+	local -r curwd="$(pwd)"
+	local -r -i max_runs=10
+	local -i successful_build=1
+
+	log_action_begin_msg "Building frontend dependencies"
+
+	cd "$basedir/$frontenddir" || return 1
+	# in case insufficient ram repeat build til successful
+	for (( i=1; i<=max_runs; i++));
+	do
+		if npm run build &> /dev/null;
+		then
+			successful_build=0
+			break;
+        fi
+	done
+
+	if (( successful_build != 0 ));
+	then
+	    log_action_end_msg 1 
+		log_failure_msg "Unable to build frontend. Give up."
+		exit 1
+	fi
+
+	log_action_end_msg 0 
+
+	cd "$curwd" || return 1
+}
+
 
 #                                                           CONFIGURE_BACKEND()
 ###############################################################################
@@ -511,8 +536,8 @@ configure_backend()
 	local -r basedir="/var/www/$domainlabel"
 	local -r backenddir="backend/cbdbene-backend"
 	local -r envfile=".env"
-	local -r serverurl="https://$domainlabel.com"
 	local -r clienturl="https://$domainlabel.com"
+	local -r serverurl="https://$domainlabel.com"
 	local -r dbname="admin"
 	local -r dbusername="admin"
 	local -r dbpassword="admin123"
@@ -625,8 +650,8 @@ setup_nginx()
 
 	log_action_begin_msg "Configure and restart webserver"
 
-	[[ -f "$conffile" ]] && sudo rm "$conffile"
-	[[ -e "$symlink" ]] && sudo rm "$symlink"
+	[[ -e "$symlink" ]] && sudo rm "$symlink" &> /dev/null
+	[[ -f "$conffile" ]] && sudo rm "$conffile" &> /dev/null
 
 	cat << EOF | sudo tee -a "$conffile" > /dev/null
 	server {
@@ -679,14 +704,14 @@ setup_nginx()
 	}
 EOF
 
-	sudo sed -i "s/^\t//" "$conffile"
+	sudo sed -i "s/^\t//" "$conffile" &> /dev/null
 
 	# adapt /etc/host since no access to dns server
 	sudo sed -i \
 		"s/\(^127\.0\.0\.1.*localhost \).*$/\1 $domain admin.$domain/"\
 		/etc/hosts
 
-	sudo ln -s "$conffile" "$symlink"
+	sudo ln -s "$conffile" "$symlink" &> /dev/null
 
 	sudo service nginx restart &> /dev/null
 
@@ -761,6 +786,9 @@ remove_installation()
 	sudo rm -rf "$basedir"
 
 	remove_conf_files
+
+  # removes pm2 startup scripts
+  bash -c "$(pm2 unstartup | tail -n 1)"
 
 	return 0
 }
