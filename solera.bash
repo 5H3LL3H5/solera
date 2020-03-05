@@ -81,7 +81,7 @@ install_package_dependencies()
 {
 	local -r nginx_flavour="light"
 	local -r viaapt="git nginx-$nginx_flavour sed coreutils systemd
-					 init-system-helpers openssl gnupg wget curl"
+					 init-system-helpers openssl gnupg curl"
 	local -r vianpm="pm2"
 	local package
 
@@ -267,7 +267,7 @@ install_mongodb_package()
 
 	# import public key
 	log_action_begin_msg "Import MongoDB public gpg key"
-	wget -qO - \
+	curl -sL \
 		https://www.mongodb.org/static/pgp/server-"$mongodb_version".asc | \
 		&>> "$LOGFILE" sudo apt-key add -
 	log_action_end_msg $?
