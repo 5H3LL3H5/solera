@@ -56,8 +56,8 @@ teardown() {
 	[ "$status" -eq 3 ]
 }
 
-@test "is_npm_package_installed(): Call with valid and installed package name" {
-	sudo npm install -g pm2
-	run is_npm_package_installed pm2
-	[ "$status" -eq 0 ]
-}
+#@test "is_npm_package_installed(): Call with valid and installed package name" {
+#sudo npm install -g pm2
+#run is_npm_package_installed pm2
+#[ "$status" -eq 0 ]
+#}
