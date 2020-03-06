@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2024
 #
 # Copyright (C) 2020, Christian Stenzel, <christianstenzel@linux.com>
 #
@@ -34,6 +35,8 @@ main()
 
 	clone_git_reps
 
+	install_javascript_dependencies
+
 	configure_backend
 
 	configure_frontend
@@ -43,22 +46,21 @@ main()
 	install_certbot
 
 	# install certificates via letscert
-	&>> "$LOGFILE" \
-		sudo certbot certonly \
-			--non-interactive \
-			--agree-tos \
-			--register-unsafely-without-email \
-			--nginx \
-			--domain "${fqdn#www.}" \
-			--domain "$fqdn" \
-			--domain admin."${fqdn#www.}"
-	
+	sudo certbot run \
+		--non-interactive \
+		--agree-tos \
+		--register-unsafely-without-email \
+		--nginx \
+		--domain "${fqdn#www.}" \
+		--domain "$fqdn" \
+		--domain admin."${fqdn#www.}" &>> "$LOGFILE"
+
 	start_backend
 	start_frontend
 
 	# install startup scripts
-	&>> "$LOGFILE" pm2 save
-	&>> "$LOGFILE" bash -c "$(pm2 startup | tail -n 1)"
+	pm2 save &>> "$LOGFILE"
+	bash -c "$(pm2 startup | tail --lines 1)" &>> "$LOGFILE"
 
 	return 0 # exit success
 }
@@ -83,6 +85,7 @@ install_package_dependencies()
 	local -r viaapt="git nginx-$nginx_flavour sed coreutils systemd
 					 init-system-helpers openssl gnupg curl"
 	local -r vianpm="pm2"
+
 	local package
 
 	log_action_begin_msg "Updating apt database"
@@ -99,13 +102,15 @@ install_package_dependencies()
 		# install instruction
 		# https://github.com/nodesource/distributions/blob/master/README.md
 		log_action_begin_msg "Installing nodejs"
-		&>> "$LOGFILE" curl -sL https://deb.nodesource.com/setup_13.x | sudo -E bash -
-		install_apt_package nodejs 
-		log_action_end_msg 0 
+		sudo --preserve-env \
+			bash - < <(curl --silent --location \
+				http://deb.nodesource.com/setup_13.x) &>> "$LOGFILE"
+		install_apt_package nodejs
+		log_action_end_msg 0
 		# update to latest https://www.npmjs.com/get-npm
-		log_action_begin_msg "Installing latest npm" 
-		&>> "$LOGFILE" sudo npm install npm@latest -g
-		log_action_end_msg 0 
+		log_action_begin_msg "Installing latest npm"
+		sudo npm install npm@latest &>> "$LOGFILE"
+		log_action_end_msg 0
 	fi
 
 	for package in $vianpm;
@@ -143,7 +148,7 @@ is_apt_package_installed()
 		return 2                # invalid package name
 	fi
 
-	if ! &>> "$LOGFILE" dpkg --status "$package";
+	if ! dpkg --status "$package" &>> "$LOGFILE";
 	then
 		return 3                # package not installed
 	fi
@@ -179,7 +184,7 @@ is_npm_package_installed()
 		return 2                # invalid package name
 	fi
 
-	if ! &>> "$LOGFILE" npm list -g "$package";
+	if ! npm list --global "$package" &>> "$LOGFILE";
 	then
 		return 3                # package not installed
 	fi
@@ -201,7 +206,7 @@ install_apt_package()
 	if ! is_apt_package_installed "$package";
 	then
 		log_action_begin_msg "Installing $package via apt"
-		&>> "$LOGFILE" sudo apt-get -y install "$package"
+		sudo apt-get --assume-yes install "$package" &>> "$LOGFILE"
 		log_end_msg $?
 	fi
 }
@@ -220,7 +225,7 @@ install_npm_package()
 	if ! is_npm_package_installed "$package";
 	then
 		log_action_begin_msg "Installing $package via npm"
-		&>> "$LOGFILE" sudo npm install -g "$package"
+		sudo npm install --global "$package" &>> "$LOGFILE"
 		log_end_msg $?
 	fi
 }
@@ -235,7 +240,7 @@ install_mongodb_package()
 {
 	local -r -i port=80
 	local -r mongodb_version="4.2"
-	local -r lsb_release_name=$(lsb_release -sc)
+	local -r lsb_release_name=$(lsb_release --codename --short)
 	local -r apt_source_fn="mongodb-org-$mongodb_version.list"
 	local -r apt_source_dir="/etc/apt/sources.list.d/"
 	local -r service="mongod"
@@ -253,36 +258,31 @@ install_mongodb_package()
 	remove_conf_files
 
 	# create log and lib dir
-	if [[ ! -d /var/log/mongodb ]];
-	then
-		&>> "$LOGFILE" sudo mkdir -p /var/log/mongodb
-		&>> "$LOGFILE" sudo chown mongodb:mongodb /var/log/mongodb
-	fi
+	[[ ! -d /var/lib/mongodb ]] && \
+		sudo mkdir --parents /var/lib/mongodb &>> "$LOGFILE" 
 
-	if [[ ! -d /var/lib/mongodb ]];
-	then
-		&>> "$LOGFILE" sudo mkdir -p /var/lib/mongodb
-		&>> "$LOGFILE" sudo chown mongodb:mongodb /var/lib/mongodb
-	fi
+	[[ ! -d /var/log/mongodb ]] && \
+		sudo mkdir --parents /var/log/mongodb &>> "$LOGFILE" 
 
 	# import public key
 	log_action_begin_msg "Import MongoDB public gpg key"
-	curl -sL \
-		https://www.mongodb.org/static/pgp/server-"$mongodb_version".asc | \
-		&>> "$LOGFILE" sudo apt-key add -
+	sudo apt-key add - < <(curl --silent --location \
+		https://www.mongodb.org/static/pgp/server-"$mongodb_version".asc) \
+		&>> "$LOGFILE"
 	log_action_end_msg $?
 
 	# create MongoDB list file in /etc/apt/sources.list.d
 	log_action_begin_msg "Create MongoDB source list file"
 	echo "deb http://repo.mongodb.org/apt/ubuntu \
 		$lsb_release_name/mongodb-org/$mongodb_version multiverse" |\
-		&>> "$LOGFILE" sudo tee "$apt_source_dir/$apt_source_fn"
+		sudo tee "$apt_source_dir/$apt_source_fn" &>> "$LOGFILE"
 	log_action_end_msg $?
 
 	# update rep and install mongodb
 	log_action_begin_msg "Updating apt database"
-	&>> "$LOGFILE" sudo apt-get update
+	sudo apt-get update &>> "$LOGFILE"
 	log_action_end_msg $?
+
 	install_apt_package "$package"
 
 	# pins current mongodb version
@@ -294,7 +294,7 @@ install_mongodb_package()
 
 	# create mongo db system service
 	cat <<-EOF | \
-	>> "$LOGFILE" sudo tee -a /lib/systemd/system/"$mongo_service_fn"
+	sudo tee --append /lib/systemd/system/"$mongo_service_fn" >> "$LOGFILE"
 		[Unit]
 		Description=High-performance, schema-free document-oriented database
 		After=network.target
@@ -309,24 +309,33 @@ install_mongodb_package()
 		WantedBy=multi-user.target
 	EOF
 
+	# change directory permissions if necessary
+	[[ "$(stat --format '%U' /var/lib/mongodb/)" != "mongodb" ]] && \
+			sudo chown --recursive mongodb:mongodb /var/lib/mongodb \
+				&>> "$LOGFILE"
+
+	[[ "$(stat --format '%U' /var/log/mongodb/)" != "mongodb" ]] && \
+			sudo chown --recursive mongodb:mongodb /var/log/mongodb \
+				&>> "$LOGFILE"
+
 	# update systemd service
 	log_action_begin_msg "Reloading daemon configuration"
-	&>> "$LOGFILE" sudo systemctl daemon-reload
+	sudo systemctl daemon-reload &>> "$LOGFILE"
 	log_action_end_msg $?
 
 	# start MongoDB and add it as a service to be started at boot time
 	log_action_begin_msg "Starting $service"
-	&>> "$LOGFILE" sudo systemctl start "$service"
+	sudo systemctl start "$service" &>> "$LOGFILE"
 	log_action_end_msg $?
 	log_action_begin_msg "Enabling $service"
-	&>> "$LOGFILE" sudo systemctl enable "$service"
+	sudo systemctl enable "$service" &>> "$LOGFILE"
 	log_action_end_msg $?
 
 	# wait five secs for service startup
 	sleep 5
 
 	log_action_begin_msg "Check status of $service"
-	if ! &>> "$LOGFILE" sudo systemctl status "$service";
+	if ! sudo systemctl status "$service" &>> "$LOGFILE";
 	then
 		log_action_end_msg 1
 		return 1
@@ -350,35 +359,35 @@ setup_mongo_database()
 	local -r service="mongod"
 
 	log_action_begin_msg "Deleting MongoDB user $username"
-	&>> "$LOGFILE" mongo --quiet --eval "
+	mongo --quiet --eval "
 	db=db.getSiblingDB(\"$db\");
-	db.dropUser(\"$username\")"
+	db.dropUser(\"$username\")" &>> "$LOGFILE"
 	log_action_end_msg $?
 
 	log_action_begin_msg "Adding inital user $username to database"
-	&>> "$LOGFILE" mongo --quiet --eval "
+	mongo --quiet --eval "
 		db=db.getSiblingDB(\"$db\");
 		db.createUser({
 		user:\"$username\", \
 		pwd:\"$password\", \
-		roles:[{role:'root', db:'$db'}]})"
+		roles:[{role:'root', db:'$db'}]})" &>> "$LOGFILE"
 	log_action_end_msg $?
 
 	log_action_begin_msg "Adapting $service configuration"
 	pattern="^ExecStart=.*$"
 	repl="ExecStart=/usr/bin/mongod --quiet --auth --config /etc/mongod.conf"
-	sudo sed -i \
+	sudo sed --in-place \
 		"s/$pattern/${repl//\//\\/}/" \
 		/lib/systemd/system/mongod.service
 	log_action_end_msg $?
 
 	# reloading service
 	log_action_begin_msg "Reloading daemon configuration"
-	&>> "$LOGFILE" sudo systemctl daemon-reload
+	sudo systemctl daemon-reload &>> "$LOGFILE"
 	log_action_end_msg $?
 
 	log_action_begin_msg "Restarting $service"
-	&>> "$LOGFILE" sudo service "$service" restart
+	sudo service "$service" restart &>> "$LOGFILE"
 	log_action_end_msg $?
 
 	return 0
@@ -397,29 +406,30 @@ clone_git_reps()
 
 	if [[ ! -d "$basedir" ]];
 	then
-		&>> "$LOGFILE" sudo mkdir -p "$basedir"
-		&>> "$LOGFILE" sudo chown -R "$USER:$(id --group --name)" "$basedir"
+		sudo mkdir --parents "$basedir" &>> "$LOGFILE"
+		sudo chown --recursive "$USER:$(id --group --name)" "$basedir" \
+			&>> "$LOGFILE"
 	fi
 
 	if [[ ! -d "$basedir/$backenddir" ]];
 	then
 		log_action_begin_msg "Cloning backend"
-		&>> "$LOGFILE" git -C "$basedir" clone "$backenduri" "$backenddir" 
+		git -C "$basedir" clone "$backenduri" "$backenddir" &>> "$LOGFILE"
 		log_action_end_msg $?
 	else
 		log_action_begin_msg "Pulling backend"
-		&>> "$LOGFILE" git -C "$basedir/$backenddir" pull
+		git -C "$basedir/$backenddir" pull &>> "$LOGFILE"
 		log_action_end_msg $?
 	fi
 
 	if [[ ! -d "$basedir/$frontenddir" ]];
 	then
 		log_action_begin_msg "Cloning frontend"
-		&>> "$LOGFILE" git -C "$basedir" clone "$frontenduri" "$frontenddir" 
+		git -C "$basedir" clone "$frontenduri" "$frontenddir" &>> "$LOGFILE"
 		log_action_end_msg $?
 	else
 		log_action_begin_msg "Pulling frontend"
-		&>> "$LOGFILE" git -C "$basedir/$frontenddir" pull
+		git -C "$basedir/$frontenddir" pull &>> "$LOGFILE"
 		log_action_end_msg $?
 	fi
 }
@@ -432,18 +442,17 @@ install_javascript_dependencies()
 	local -r basedir="/var/www/$domainlabel"
 	local -r backenddir="backend"
 	local -r frontenddir="frontend"
-
 	local -r curwd="$(pwd)"
-
-	log_action_begin_msg "Install frontend dependencies"
-	cd "$basedir/$frontenddir" || return 1
-	&>> "$LOGFILE" npm update
-	log_action_end_msg $?
-	cd "$curwd" || return 1
 
 	log_action_begin_msg "Install backend dependencies"
 	cd "$basedir/$backenddir" || return 1
-	&>> "$LOGFILE" npm update
+	npm update &>> "$LOGFILE"
+	log_action_end_msg $?
+	cd "$curwd" || return 1
+
+	log_action_begin_msg "Install frontend dependencies"
+	cd "$basedir/$frontenddir" || return 1
+	npm update &>> "$LOGFILE"
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
@@ -472,8 +481,8 @@ adapt_frontend_port()
 	local -r conffile="$basedir/$frontenddir/package.json"
 
 	log_action_begin_msg "Adapting frontend port"
-	sed -i "s/$pattern1/${pattern1:0:-1} -p $port\"/" "$conffile"
-	sed -i "s/$pattern2/${pattern2:0:-1} -p $port\"/" "$conffile"
+	sed --in-place "s/$pattern1/${pattern1:0:-1} -p $port\"/" "$conffile"
+	sed --in-place "s/$pattern2/${pattern2:0:-1} -p $port\"/" "$conffile"
 	log_action_end_msg $?
 }
 
@@ -492,8 +501,8 @@ adapt_frontend_url()
 	local -r httpurl="http:\/\/admin.$domainlabel.com"
 
 	log_action_begin_msg "Adapting frontend url"
-	sed -i "s/^\($pattern1.*= \).*$/\1\"$httpsurl\";/" "$conffile"
-	sed -i "s/$pattern2/$httpurl/" "$conffile"
+	sed --in-place "s/^\($pattern1.*= \).*$/\1\"$httpsurl\";/" "$conffile"
+	sed --in-place "s/$pattern2/$httpurl/" "$conffile"
 	log_action_end_msg $?
 }
 
@@ -515,7 +524,7 @@ build_frontend()
 	# in case insufficient ram repeat build til successful
 	for (( i=1; i<=max_runs; i++));
 	do
-		if &>> "$LOGFILE" npm run build;
+		if npm run build &>> "$LOGFILE";
 		then
 			successful_build=0
 			break;
@@ -524,12 +533,12 @@ build_frontend()
 
 	if (( successful_build != 0 ));
 	then
-		log_action_end_msg 1 
+		log_action_end_msg 1
 		log_failure_msg "Unable to build frontend. Give up."
 		exit 1
 	fi
 
-	log_action_end_msg 0 
+	log_action_end_msg 0
 
 	cd "$curwd" || return 1
 }
@@ -586,7 +595,7 @@ start_backend()
 
 	cd "$basedir/$backenddir" || return 1
 	log_action_begin_msg "Starting nodejs backend"
-	&>> "$LOGFILE" pm2 start "npm start" -n "$instance_name"
+	pm2 start "npm start" --name "$instance_name" &>> "$LOGFILE"
 	log_action_end_msg $?
 	sleep 3
 	cd "$curwd" || return 1
@@ -601,12 +610,12 @@ start_frontend()
 	local -r curwd="$(pwd)"
 	local -r instance_name="$domainlabel-frontend"
 
-	# delete running pm2 frontend 
+	# delete running pm2 frontend
 	delete_pm2_process "$instance_name"
-	
+
 	cd "$basedir/$frontenddir" || return 1
 	log_action_begin_msg "Starting nodejs frontend"
-	&>> "$LOGFILE" pm2 start "npm start" -n "$instance_name"
+	pm2 start "npm start" --name "$instance_name" &>> "$LOGFILE"
 	log_action_end_msg $?
 	sleep 3
 	cd "$curwd" || return 1
@@ -618,11 +627,11 @@ delete_pm2_process()
 {
 	local -r process="$1"
 
-	! grep -q "$process" < <(pm2 ls) && return 1 
+	! grep --quiet "$process" < <(pm2 ls) && return 1
 
-	&>> "$LOGFILE" pm2 delete "$process"
-	
-	return $? 
+	pm2 delete "$process" &>> "$LOGFILE"
+
+	return $?
 }
 
 
@@ -633,78 +642,76 @@ setup_nginx()
 	local -r domain="$domainlabel.com"
 	local -r conffile="/etc/nginx/sites-available/$domain"
 	local -r symlink="/etc/nginx/sites-enabled/$domain"
-	local -r certpath="/etc/letsencrypt/live/$domain"
 	local -r nginx_flavour="light"
 	local -r -i frontend_port=3007
 	local -r -i backend_port=5003
 
 	log_action_begin_msg "Configure and restart webserver"
 
-	[[ -e "$symlink" ]] && sudo rm "$symlink" &>> "$LOGFILE"
-	[[ -f "$conffile" ]] && sudo rm "$conffile" &>> "$LOGFILE"
+	{
+		[[ -e "$symlink" ]] && sudo rm "$symlink"
+		[[ -f "$conffile" ]] && sudo rm "$conffile"
 
-	cat << EOF | \
-	>> "$LOGFILE" sudo tee -a "$conffile"
-	server {
-		listen 80;
-		server_name $domain www.$domain;
-		location / {
-			return 301 https://\$host\$request_uri;
+		cat << EOF | \
+		sudo tee --append "$conffile"
+		server {
+			listen 80;
+			server_name $domain www.$domain;
+			location / {
+				return 301 https://\$host\$request_uri;
+			}
 		}
-	}
 
-	server {
-		listen 443 ssl;
-		listen [::]:443 ssl ;
-		server_name $domain www.$domain;
-		location / {
-			proxy_pass http://localhost:$frontend_port;
-			proxy_http_version 1.1;
-			proxy_set_header Upgrade \$http_upgrade;
-			proxy_set_header Connection 'upgrade';
-			proxy_set_header Host \$host;
-			proxy_cache_bypass \$http_upgrade;
+		server {
+			listen 443 ssl;
+			listen [::]:443 ssl ;
+			server_name $domain www.$domain;
+			location / {
+				proxy_pass http://localhost:$frontend_port;
+				proxy_http_version 1.1;
+				proxy_set_header Upgrade \$http_upgrade;
+				proxy_set_header Connection 'upgrade';
+				proxy_set_header Host \$host;
+				proxy_cache_bypass \$http_upgrade;
+			}
 		}
-		ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;
-		ssl_certificate_key /etc/letsencrypt/live/$domain/privkey.pem;
-	}
 
-	server {
-		listen 80;
-		server_name admin.$domain;
-		location / {
-			return 301 https://\$host\$request_uri;
+		server {
+			listen 80;
+			server_name admin.$domain;
+			location / {
+				return 301 https://\$host\$request_uri;
+			}
 		}
-	}
 
-	# Point backend domain name to port
-	server {
-		listen 443 ssl;
-		index index.html index.htm index.nginx-debian.html;
-		server_name admin.$domain;
-		location / {
-			proxy_pass http://localhost:$backend_port;
-			proxy_http_version 1.1;
-			proxy_set_header Upgrade \$http_upgrade;
-			proxy_set_header Connection 'upgrade';
-			proxy_set_header Host \$host;
-			proxy_cache_bypass \$http_upgrade;
+		# Point backend domain name to port
+		server {
+			listen 443 ssl;
+			index index.html index.htm index.nginx-debian.html;
+			server_name admin.$domain;
+			location / {
+				proxy_pass http://localhost:$backend_port;
+				proxy_http_version 1.1;
+				proxy_set_header Upgrade \$http_upgrade;
+				proxy_set_header Connection 'upgrade';
+				proxy_set_header Host \$host;
+				proxy_cache_bypass \$http_upgrade;
+			}
 		}
-		ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;
-		ssl_certificate_key /etc/letsencrypt/live/$domain/privkey.pem;
-	}
 EOF
 
-	&>> "$LOGFILE" sudo sed -i "s/^\t//" "$conffile"
-	&>> "$LOGFILE" sudo ln -s "$conffile" "$symlink"
-	&>> "$LOGFILE" sudo service nginx restart
+	sudo sed --in-place "s/^\t//" "$conffile"
+	sudo ln --symbolic "$conffile" "$symlink"
+	sudo service nginx restart
+
+} &>> "$LOGFILE"
 
 	log_end_msg 0
 
 	return 0
 }
 
-#                                                             INSTALL_CERTBOT() 
+#                                                             INSTALL_CERTBOT()
 ###############################################################################
 install_certbot()
 {
@@ -712,9 +719,11 @@ install_certbot()
 
 	install_apt_package software-properties-common
 
-	&>> "$LOGFILE" sudo add-apt-repository -y universe
-	&>> "$LOGFILE" sudo add-apt-repository -y ppa:certbot/certbot
-	&>> "$LOGFILE" sudo apt-get update
+	{
+		sudo add-apt-repository --assume-yes universe
+		sudo add-apt-repository --assume-yes ppa:certbot/certbot
+		sudo apt-get update
+	} &>> "$LOGFILE"
 
 	install_apt_package certbot
 	install_apt_package python-certbot-nginx
@@ -735,14 +744,14 @@ remove_conf_files()
 	if [[ -f "$apt_source_dir/$apt_source_fn" ]];
 	then
 		log_action_begin_msg "Removing source list file $apt_source_fn"
-		&>> "$LOGFILE" sudo rm "$apt_source_dir/$apt_source_fn"
+		sudo rm "$apt_source_dir/$apt_source_fn" &>> "$LOGFILE"
 		log_action_end_msg $?
 	fi
 
 	if [[ -f "$mongo_service_dir/$mongo_service_fn" ]];
 	then
 		log_action_begin_msg "Removing system service file $mongo_service_fn"
-		&>> "$LOGFILE" sudo rm "$mongo_service_dir/$mongo_service_fn"
+		sudo rm "$mongo_service_dir/$mongo_service_fn" &>> "$LOGFILE"
 		log_action_end_msg $?
 	fi
 
@@ -762,38 +771,39 @@ remove_installation()
 	local -r basedir="/var/www/$domainlabel"
 
 
-	if sudo service --status-all | grep -Fq "$service";
+	if sudo service --status-all | grep --fixed-strings --quiet "$service";
 	then
 		log_action_begin_msg "Stopping system service $service"
-		&>> "$LOGFILE" sudo systemctl stop "$service";
+		sudo systemctl stop "$service" &>> "$LOGFILE";
 		log_action_end_msg 0
 	fi
 
-	if &>> "$LOGFILE" command -v pm2;
+	if command -v pm2 &>> "$LOGLEVEL";
 	then
 		log_action_begin_msg "Removing pm2 processes"
-		grep -q "$domainlabel-frontend" < <(pm2 ls) && \
-			&>> "$LOGFILE" pm2 delete "$domainlabel-frontend"
-		grep -q "$domainlabel-backend" < <(pm2 ls)  && \
-			&>> "$LOGFILE" pm2 delete "$domainlabel-backend"
+		grep --quiet "$domainlabel-frontend" < <(pm2 ls) && \
+			pm2 delete "$domainlabel-frontend" &>> "$LOGLEVEL"
+		grep --quiet "$domainlabel-backend" < <(pm2 ls)  && \
+			pm2 delete "$domainlabel-backend" &>> "$LOGLEVEL"
 		# removes pm2 startup scripts
-		&>> "$LOGFILE" bash -c "$(pm2 unstartup | tail -n 1)"
-		&>> "$LOGFILE" pm2 save
+		bash -c "$(pm2 unstartup | tail --lines 1)" &>> "$LOGLEVEL"
+		pm2 save &>> "$LOGLEVEL"
 		log_action_end_msg 0
 	fi
 
 	if is_apt_package_installed "$package";
 	then
 		log_action_begin_msg "Deinstalling $package"
-		[[ -d /var/log/mongodb ]] && 
-			&>> "$LOGFILE" sudo rm -r /var/log/mongodb
+		[[ -d /var/log/mongodb ]] &&
+			sudo rm --recursive /var/log/mongodb &>> "$LOGLEVEL"
 		[[ -d /var/lib/mongodb ]] && \
-			&>> "$LOGFILE" sudo rm -r /var/lib/mongodb
-		&>>	"$LOGFILE" sudo apt -y --allow-change-held-packages purge "$package"
+			sudo rm --recursive /var/lib/mongodb &>> "$LOGLEVEL"
+		sudo apt-get --assume-yes --allow-change-held-packages \
+			purge "$package" &>> "$LOGLEVEL"
 		log_action_end_msg $?
 	fi
 
-	&>> "$LOGFILE" sudo rm -rf "$basedir"
+	sudo rm --recursive --force "$basedir" &>> "$LOGLEVEL"
 
 	remove_conf_files
 
@@ -809,7 +819,9 @@ if [ "${BASH_SOURCE[0]}" == "$0" ];
 then
 
 	# source lsb init function file for advanced log functions
-	declare -r LOGFILE=$(mktemp /tmp/$(date +"%Y-%m-%d_%T_XXXXXX"))
+	declare LOGFILE
+
+	LOGFILE=$(mktemp /tmp/"$(date +"%Y-%m-%d_%T_XXXXXX")")
 	echo "Detailed log goes to $LOGFILE"
 
 	if [[ ! -f /lib/lsb/init-functions ]];
@@ -828,3 +840,4 @@ then
 	fi
 
 fi
+
