@@ -294,7 +294,7 @@ install_mongodb_package()
 
 	# create mongo db system service
 	cat <<-EOF | \
-	sudo tee --append /lib/systemd/system/"$mongo_service_fn" >> "$LOGFILE"
+	sudo tee /lib/systemd/system/"$mongo_service_fn" >> "$LOGFILE"
 		[Unit]
 		Description=High-performance, schema-free document-oriented database
 		After=network.target
