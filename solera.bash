@@ -1,64 +1,82 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2024
+#shellcheck disable=SC2024
 #
-# Copyright (C) 2020, Christian Stenzel, <christianstenzel@linux.com>
+# Copyright (C) 2020, <christianstenzel@linux.com>
 #
-# Purpose:
+# Purpose: Clones bene
 #
 #
 # Editor settings:
 # tabstops=4	/ set ts=4
 # shiftwidth=4	/ set sw=4
 
-# deug flag
-declare DEBUG						# ON enables debug output
+
+#                                                           GLOBAL DECLARATIONS
+###############################################################################
+
+
+# debug flag
+declare DEBUG					# ON enables debug output
 
 # package versions
-declare MONGODB_VERSION
-declare NODEJS_VERSION
+
+declare MONGODB_VERSION			# package version of mongodb
+declare NODEJS_VERSION			# nodejs release version
 
 # domain
-declare FQDN						# full qualified domain name
+
+declare FQDN					# full qualified domain name
 
 # frontand and backend locations
-declare BACKENDURI
-declare FRONTENDURI
+
+declare BACKENDURI				# git rep of backend
+declare FRONTENDURI				# git rep of frontend
+
 
 # database settings
-declare DBHOSTNAME
-declare DBPORT
-declare DBNAME
-declare DBUSERNAME
-declare DBPASSWORD
+declare DBHOSTNAME				# hostname of db server
+declare DBPORT					# port number of db server
+declare DBNAME					# database name
+declare DBUSERNAME				# database user
+declare DBPASSWORD				# database password
 
 # backend settings
+
 declare CLIENTID
 declare CLIENTSECRET
 declare KEYID
 declare REGION
 declare ACCESSKEY
 declare BUCKET
-declare BACKENDPORT
+declare BACKENDPORT				# port number of nidejs backend
 
 # frontend settings
-declare FRONTENDPORT
 
+declare FRONTENDPORT			# port number of nodejs frontend
 
 # script globals evaluated at runtime
-declare PID_LOG						# holds process id of debug stream
-declare DOMAIN						# cstenzel.com
-declare DOMAINLABEL					# cstenzel
-declare BASEDIR						# /var/www/$DOMAIN
 
+declare PID_LOG					# holds process id of debug stream
+declare DOMAIN					# cstenzel.com
+declare DOMAINLABEL				# cstenzel
+declare BASEDIR					# /var/www/$DOMAIN
+
+
+#                                                                SIGNAL HANDLER
+###############################################################################
 
 #                                                                     CLEANUP()
 #
 # cleanup on exit, signal handler
+# tests for active debug og stream and kills corresponding process
 ###############################################################################
 cleanup()
 {
-		[[ -n $PID_LOG ]] && kill -9 "$PID_LOG"
+	[[ -n $PID_LOG ]] && kill -9 "$PID_LOG"
 }
+
+#                                                              SCRIPT FUNCTIONS
+###############################################################################
 
 #                                                                        MAIN()
 #
@@ -66,8 +84,6 @@ cleanup()
 ###############################################################################
 main()
 {
-	local -r package="mongodb-org"
-
 	check_config_file
 
 	LOGFILE=$(mktemp /tmp/"$(date +"%Y-%m-%d_%T_XXXXXX")")
@@ -161,8 +177,6 @@ check_config_file()
 	DOMAINLABEL=${DOMAIN%.*}		# cstenzel
 	BASEDIR="/var/www/$DOMAINLABEL"
 
-	exit 1
-
 	return 0	      # exit success
 }
 
@@ -178,8 +192,6 @@ install_package_dependencies()
 	local -r viaapt="git nginx-$nginx_flavour sed coreutils systemd
 					init-system-helpers ca-certificates curl"
 	local -r vianpm="pm2"
-
-	local package
 
 	log_action_begin_msg "Updating apt database"
 	sudo apt-get update &>> "$LOGFILE"
@@ -839,6 +851,5 @@ then
 		log_end_msg 1
 		exit 1
 	fi
-
 fi
 
