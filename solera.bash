@@ -83,7 +83,7 @@ install_package_dependencies()
 {
 	local -r nginx_flavour="light"
 	local -r viaapt="git nginx-$nginx_flavour sed coreutils systemd
-					 init-system-helpers ca-certificates curl"
+					init-system-helpers ca-certificates curl"
 	local -r vianpm="pm2"
 
 	local package
@@ -101,7 +101,7 @@ install_package_dependencies()
 	then
 		# install instruction
 		# https://github.com/nodesource/distributions/blob/master/README.md
-		log_action_begin_msg "Preparing nodej installation"
+		log_action_begin_msg "Preparing nodejs installation"
 		sudo --preserve-env \
 			bash - < <(curl --silent --location \
 				http://deb.nodesource.com/setup_13.x) &>> "$LOGFILE"
@@ -259,10 +259,10 @@ install_mongodb_package()
 
 	# create log and lib dir
 	[[ ! -d /var/lib/mongodb ]] && \
-		sudo mkdir --parents /var/lib/mongodb &>> "$LOGFILE" 
+		sudo mkdir --parents /var/lib/mongodb &>> "$LOGFILE"
 
 	[[ ! -d /var/log/mongodb ]] && \
-		sudo mkdir --parents /var/log/mongodb &>> "$LOGFILE" 
+		sudo mkdir --parents /var/log/mongodb &>> "$LOGFILE"
 
 	# import public key
 	log_action_begin_msg "Import MongoDB public gpg key"
