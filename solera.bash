@@ -498,11 +498,10 @@ adapt_frontend_url()
 	local -r pattern1="export const baseUrl"
 	local -r pattern2="https:\/\/admin.cbdbene.com"
 	local -r httpsurl="https:\/\/admin.$domainlabel.com"
-	local -r httpurl="http:\/\/admin.$domainlabel.com"
 
 	log_action_begin_msg "Adapting frontend url"
 	sed --in-place "s/^\($pattern1.*= \).*$/\1\"$httpsurl\";/" "$conffile"
-	sed --in-place "s/$pattern2/$httpurl/" "$conffile"
+	sed --in-place "s/$pattern2/$httspurl/" "$conffile"
 	log_action_end_msg $?
 }
 
