@@ -1,0 +1,32 @@
+# script control parameter
+DEBUG="OFF"					# debug stream to stdout
+
+# package versions
+MONGODB_VERSION="4.2"
+NODEJS_VERSION=13
+
+# domain
+FQDN="www.cstenzel.com"
+
+# frontand and backend locations
+BACKENDURI="https://github.com/Anas-MI/cbdbene-backend.git"
+FRONTENDURI="https://github.com/shubhamAyodhyavasi/cbdbenev2.git"
+
+# database settings
+DBHOSTNAME="localhost"
+DBPORT=27017
+DBNAME="admin"
+DBUSERNAME="admin"
+DBPASSWORD="admin123"
+
+# backend settings
+CLIENTID="936223668088-mg6le6oiabj4qrpj82c28dpj8ctf648d.apps.googleusercontent.com"
+CLIENTSECRET="gWiuvxeJ4mbddARAdIYsnltc"
+KEYID="AKIAJMUJXEIE42GYPGRA"
+REGION="us-west-2"
+ACCESSKEY="n45vnKDW053nk+129lnbyEQkZkCVkN8m20Qs6Js2"
+BUCKET="new-maxxbio"
+BACKENDPORT=5003
+
+# frontend settings
+FRONTENDPORT=3007

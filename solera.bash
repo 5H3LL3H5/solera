@@ -10,9 +10,55 @@
 # tabstops=4	/ set ts=4
 # shiftwidth=4	/ set sw=4
 
-declare fqdn="www.cstenzel.com"
-declare sld=${fqdn#www.}			# sagesutra2.com
-declare domainlabel=${sld%.*}		# sagesutra2
+# deug flag
+declare DEBUG						# ON enables debug output
+
+# package versions
+declare MONGODB_VERSION
+declare NODEJS_VERSION
+
+# domain
+declare FQDN						# full qualified domain name
+
+# frontand and backend locations
+declare BACKENDURI
+declare FRONTENDURI
+
+# database settings
+declare DBHOSTNAME
+declare DBPORT
+declare DBNAME
+declare DBUSERNAME
+declare DBPASSWORD
+
+# backend settings
+declare CLIENTID
+declare CLIENTSECRET
+declare KEYID
+declare REGION
+declare ACCESSKEY
+declare BUCKET
+declare BACKENDPORT
+
+# frontend settings
+declare FRONTENDPORT
+
+
+# script globals evaluated at runtime
+declare PID_LOG						# holds process id of debug stream
+declare DOMAIN						# cstenzel.com
+declare DOMAINLABEL					# cstenzel
+declare BASEDIR						# /var/www/$DOMAIN
+
+
+#                                                                     CLEANUP()
+#
+# cleanup on exit, signal handler
+###############################################################################
+cleanup()
+{
+		[[ -n $PID_LOG ]] && kill -9 "$PID_LOG"
+}
 
 #                                                                        MAIN()
 #
@@ -22,16 +68,25 @@ main()
 {
 	local -r package="mongodb-org"
 
-	# ONLY IN DEV
-	# remove_installation
+	check_config_file
+
+	LOGFILE=$(mktemp /tmp/"$(date +"%Y-%m-%d_%T_XXXXXX")")
+	echo "Detailed log goes to $LOGFILE"
+
+	if [[ "$DEBUG" == "ON" ]];
+	then
+		# command output to stdout
+		( tail -f "$LOGFILE" ) &
+		PID_LOG=$!
+	fi
 
 	install_package_dependencies
 
 	install_mongodb_package
 
 	# delete any runnning pm2 domain related processes
-	delete_pm2_process "$domainlabel-backend"
-	delete_pm2_process "$domainlabel-frontend"
+	delete_pm2_process "$DOMAINLABEL-backend"
+	delete_pm2_process "$DOMAINLABEL-frontend"
 
 	clone_git_reps
 
@@ -51,9 +106,9 @@ main()
 		--agree-tos \
 		--register-unsafely-without-email \
 		--nginx \
-		--domain "${fqdn#www.}" \
-		--domain "$fqdn" \
-		--domain admin."${fqdn#www.}" &>> "$LOGFILE"
+		--domain "$DOMAIN" \
+		--domain "$FQDN" \
+		--domain admin."$DOMAIN" &>> "$LOGFILE"
 
 	start_backend
 	start_frontend
@@ -72,6 +127,42 @@ main()
 ###############################################################################
 check_config_file()
 {
+	local -r config="./installconfig"
+
+	# shellcheck source=./installconfig
+	[[ -f "$config" ]] && source "$config"
+
+	if [[ \
+			-z "$MONGODB_VERSION" || \
+			-z "$NODEJS_VERSION" || \
+			-z "$FQDN" || \
+			-z "$BACKENDURI" || \
+			-z "$FRONTENDURI" || \
+			-z "$DBHOSTNAME" || \
+			-z "$DBPORT" || \
+			-z "$DBNAME" || \
+			-z "$DBUSERNAME" ||  \
+			-z "$DBPASSWORD" || \
+			-z "$CLIENTID" || \
+			-z "$CLIENTSECRET" || \
+			-z "$KEYID" || \
+			-z "$REGION" || \
+			-z "$ACCESSKEY" || \
+			-z "$BUCKET" || \
+			-z "$BACKENDPORT" || \
+			-z "$FRONTENDPORT" \
+	]];
+	then
+		echo "Invalid config file."
+		exit 1
+	fi
+
+	DOMAIN=${FQDN#www.}				# cstenzel.com
+	DOMAINLABEL=${DOMAIN%.*}		# cstenzel
+	BASEDIR="/var/www/$DOMAINLABEL"
+
+	exit 1
+
 	return 0	      # exit success
 }
 
@@ -81,6 +172,8 @@ check_config_file()
 ###############################################################################
 install_package_dependencies()
 {
+	local -r node_version="$NODEJS_VERSION"
+
 	local -r nginx_flavour="light"
 	local -r viaapt="git nginx-$nginx_flavour sed coreutils systemd
 					init-system-helpers ca-certificates curl"
@@ -104,7 +197,8 @@ install_package_dependencies()
 		log_action_begin_msg "Preparing nodejs installation"
 		sudo --preserve-env \
 			bash - < <(curl --silent --location \
-				http://deb.nodesource.com/setup_13.x) &>> "$LOGFILE"
+			http://deb.nodesource.com/setup_"$node_version".x) \
+			&>> "$LOGFILE"
 		log_action_end_msg 0
 		install_apt_package nodejs
 		# update to latest https://www.npmjs.com/get-npm
@@ -238,14 +332,13 @@ install_npm_package()
 ###############################################################################
 install_mongodb_package()
 {
-	local -r -i port=80
-	local -r mongodb_version="4.2"
+	local -r mongodb_version="$MONGODB_VERSION"
+
 	local -r lsb_release_name=$(lsb_release --codename --short)
 	local -r apt_source_fn="mongodb-org-$mongodb_version.list"
 	local -r apt_source_dir="/etc/apt/sources.list.d/"
 	local -r service="mongod"
 	local -r mongo_service_fn="$service.service"
-	local -r mongo_service_dir="/lib/systemd/system/"
 
 	local -r package="mongodb-org"
 
@@ -253,9 +346,6 @@ install_mongodb_package()
 	then
 		return 1;
 	fi
-
-	# remove artefacts from previous installations
-	remove_conf_files
 
 	# create log and lib dir
 	[[ ! -d /var/lib/mongodb ]] && \
@@ -353,24 +443,25 @@ install_mongodb_package()
 ###############################################################################
 setup_mongo_database()
 {
-	local -r username="admin"
-	local -r password="admin123"
-	local -r db="admin"
+	local -r dbusername="$DBUSERNAME"
+	local -r dbpassword="$DBPASSWORD"
+	local -r dbname="$DBNAME"
+
 	local -r service="mongod"
 
-	log_action_begin_msg "Deleting MongoDB user $username"
+	log_action_begin_msg "Deleting MongoDB user $dbusername"
 	mongo --quiet --eval "
-	db=db.getSiblingDB(\"$db\");
-	db.dropUser(\"$username\")" &>> "$LOGFILE"
+	db=db.getSiblingDB(\"$dbname\");
+	db.dropUser(\"$dbusername\")" &>> "$LOGFILE"
 	log_action_end_msg $?
 
-	log_action_begin_msg "Adding inital user $username to database"
+	log_action_begin_msg "Adding inital user $dbusername to database"
 	mongo --quiet --eval "
-		db=db.getSiblingDB(\"$db\");
+		db=db.getSiblingDB(\"$dbname\");
 		db.createUser({
-		user:\"$username\", \
-		pwd:\"$password\", \
-		roles:[{role:'root', db:'$db'}]})" &>> "$LOGFILE"
+		user:\"$dbusername\", \
+		pwd:\"$dbpassword\", \
+		roles:[{role:'root', db:'$dbname'}]})" &>> "$LOGFILE"
 	log_action_end_msg $?
 
 	log_action_begin_msg "Adapting $service configuration"
@@ -398,11 +489,9 @@ setup_mongo_database()
 ###############################################################################
 clone_git_reps()
 {
-	local -r basedir="/var/www/$domainlabel"
-	local -r backenddir="backend"
-	local -r backenduri="https://github.com/Anas-MI/cbdbene-backend.git"
-	local -r frontenddir="frontend"
-	local -r frontenduri="https://github.com/shubhamAyodhyavasi/cbdbenev2.git"
+	local -r basedir="$BASEDIR"
+	local -r frontenduri="$FRONTENDURI"
+	local -r backenduri="$BACKENDURI"
 
 	if [[ ! -d "$basedir" ]];
 	then
@@ -411,25 +500,25 @@ clone_git_reps()
 			&>> "$LOGFILE"
 	fi
 
-	if [[ ! -d "$basedir/$backenddir" ]];
+	if [[ ! -d "$basedir/backend" ]];
 	then
 		log_action_begin_msg "Cloning backend"
-		git -C "$basedir" clone "$backenduri" "$backenddir" &>> "$LOGFILE"
+		git -C "$basedir" clone "$backenduri" backend &>> "$LOGFILE"
 		log_action_end_msg $?
 	else
 		log_action_begin_msg "Pulling backend"
-		git -C "$basedir/$backenddir" pull &>> "$LOGFILE"
+		git -C "$basedir/backend" pull &>> "$LOGFILE"
 		log_action_end_msg $?
 	fi
 
-	if [[ ! -d "$basedir/$frontenddir" ]];
+	if [[ ! -d "$basedir/frontend" ]];
 	then
 		log_action_begin_msg "Cloning frontend"
-		git -C "$basedir" clone "$frontenduri" "$frontenddir" &>> "$LOGFILE"
+		git -C "$basedir" clone "$frontenduri" "frontend" &>> "$LOGFILE"
 		log_action_end_msg $?
 	else
 		log_action_begin_msg "Pulling frontend"
-		git -C "$basedir/$frontenddir" pull &>> "$LOGFILE"
+		git -C "$basedir/frontend" pull &>> "$LOGFILE"
 		log_action_end_msg $?
 	fi
 }
@@ -439,18 +528,19 @@ clone_git_reps()
 ###############################################################################
 install_javascript_dependencies()
 {
-	local -r basedir="/var/www/$domainlabel"
-	local -r backenddir="backend"
-	local -r frontenddir="frontend"
+	local -r basedir="$BASEDIR"
+
 	local -r curwd="$(pwd)"
 
-	cd "$basedir/$backenddir" || return 1
+	sudo chown -R "$USER":"$(id -gn "$USER")" "$HOME"/.config &>> "$LOGFILE"
+
+	cd "$basedir/backend" || return 1
 	log_action_begin_msg "Install backend dependencies"
 	npm update &>> "$LOGFILE"
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
-	cd "$basedir/$frontenddir" || return 1
+	cd "$basedir/frontend" || return 1
 	log_action_begin_msg "Install frontend dependencies"
 	npm update &>> "$LOGFILE"
 	log_action_end_msg $?
@@ -473,12 +563,12 @@ configure_frontend()
 ###############################################################################
 adapt_frontend_port()
 {
-	local -i port=3007
+	local -i port="$FRONTENDPORT"
+	local -r basedir="$BASEDIR"
+
+	local -r conffile="$basedir/frontend/package.json"
 	local -r pattern1='"dev": "next dev"'
 	local -r pattern2='"start": "next start"'
-	local -r basedir="/var/www/$domainlabel"
-	local -r frontenddir="frontend"
-	local -r conffile="$basedir/$frontenddir/package.json"
 
 	log_action_begin_msg "Adapting frontend port"
 	sed --in-place "s/$pattern1/${pattern1:0:-1} -p $port\"/" "$conffile"
@@ -491,17 +581,16 @@ adapt_frontend_port()
 ###############################################################################
 adapt_frontend_url()
 {
-	local -r basedir="/var/www/$domainlabel"
-	local -r frontenddir="frontend"
-	local -r conffile="$basedir/$frontenddir/constants/projectSettings.js"
+	local -r basedir="$BASEDIR"
+	local -r conffile="$basedir/frontend/constants/projectSettings.js"
 
 	local -r pattern1="export const baseUrl"
 	local -r pattern2="https:\/\/admin.cbdbene.com"
-	local -r httpsurl="https:\/\/admin.$domainlabel.com"
+	local -r httpsurl="https:\/\/admin.$DOMAINLABEL.com"
 
 	log_action_begin_msg "Adapting frontend url"
 	sed --in-place "s/^\($pattern1.*= \).*$/\1\"$httpsurl\";/" "$conffile"
-	sed --in-place "s/$pattern2/$httspurl/" "$conffile"
+	sed --in-place "s/$pattern2/$httpsurl/" "$conffile"
 	log_action_end_msg $?
 }
 
@@ -510,8 +599,7 @@ adapt_frontend_url()
 ###############################################################################
 build_frontend()
 {
-	local -r basedir="/var/www/$domainlabel"
-	local -r frontenddir="frontend"
+	local -r basedir="$BASEDIR"
 
 	local -r curwd="$(pwd)"
 	local -r -i max_runs=10
@@ -519,7 +607,7 @@ build_frontend()
 
 	log_action_begin_msg "Building frontend dependencies"
 
-	cd "$basedir/$frontenddir" || return 1
+	cd "$basedir/frontend" || return 1
 	# in case insufficient ram repeat build til successful
 	for (( i=1; i<=max_runs; i++));
 	do
@@ -547,26 +635,26 @@ build_frontend()
 ###############################################################################
 configure_backend()
 {
-	local -r basedir="/var/www/$domainlabel"
-	local -r backenddir="backend"
-	local -r envfile=".env"
-	local -r clienturl="https://$domainlabel.com"
-	local -r serverurl="https://$domainlabel.com"
-	local -r dbname="admin"
-	local -r dbusername="admin"
-	local -r dbpassword="admin123"
-	local -r dbhostname="localhost"
-	local -r -i dbport=27017
-	local -r clientid="936223668088-mg6le6oiabj4qrpj82c28dpj8ctf648d.apps.googleusercontent.com"
-	local -r clientsecret="gWiuvxeJ4mbddARAdIYsnltc"
-	local -r keyid="AKIAJMUJXEIE42GYPGRA"
-	local -r region="us-west-2"
-	local -r accesskey="n45vnKDW053nk+129lnbyEQkZkCVkN8m20Qs6Js2"
-	local -r bucket="new-maxxbio"
-	local -r -i serverport=5003
+	local -r basedir="$BASEDIR"
+	local -r dbusername="$DBUSERNAME"
+	local -r dbpassword="$DBPASSWORD"
+	local -r dbname="$DBNAME"
+	local -r dbhostname="$DBHOSTNAME"
+	local -r clientid="$CLIENTID"
+	local -r clientsecret="$CLIENTSECRET"
+	local -r keyid="$KEYID"
+	local -r region="$REGION"
+	local -r accesskey="$ACCESSKEY"
+	local -r bucket="$BUCKET"
+	local -r -i backendport="$BACKENDPORT"
+	local -r -i dbport="$DBPORT"
 
-	cat <<-EOF > "$basedir/$backenddir/$envfile"
-		PORT=$serverport
+	local -r envfile=".env"
+	local -r clienturl="https://$DOMAINLABEL.com"
+	local -r serverurl="https://$DOMAINLABEL.com"
+
+	cat <<-EOF > "$basedir/backend/$envfile"
+		PORT=$backendport
 		CLIENT_URL="$serverurl"
 		serverurl="$clienturl"
 		MONGOLAB_URI="mongodb://$dbusername:$dbpassword@$dbhostname:$dbport/$dbname?retryWrites=true&w=majority"
@@ -584,15 +672,15 @@ configure_backend()
 ###############################################################################
 start_backend()
 {
-	local -r basedir="/var/www/$domainlabel"
-	local -r backenddir="backend"
+	local -r basedir="$BASEDIR"
+	local -r instance_name="$DOMAINLABEL-backend"
+
 	local -r curwd="$(pwd)"
-	local -r instance_name="$domainlabel-backend"
 
 	# delete running pm2 backend
 	delete_pm2_process "$instance_name"
 
-	cd "$basedir/$backenddir" || return 1
+	cd "$basedir/backend" || return 1
 	log_action_begin_msg "Starting nodejs backend"
 	pm2 start "npm start" --name "$instance_name" &>> "$LOGFILE"
 	log_action_end_msg $?
@@ -604,15 +692,15 @@ start_backend()
 ###############################################################################
 start_frontend()
 {
-	local -r basedir="/var/www/$domainlabel"
-	local -r frontenddir="frontend"
+	local -r basedir="$BASEDIR"
+	local -r instance_name="$DOMAINLABEL-frontend"
+
 	local -r curwd="$(pwd)"
-	local -r instance_name="$domainlabel-frontend"
 
 	# delete running pm2 frontend
 	delete_pm2_process "$instance_name"
 
-	cd "$basedir/$frontenddir" || return 1
+	cd "$basedir/frontend" || return 1
 	log_action_begin_msg "Starting nodejs frontend"
 	pm2 start "npm start" --name "$instance_name" &>> "$LOGFILE"
 	log_action_end_msg $?
@@ -638,12 +726,12 @@ delete_pm2_process()
 ###############################################################################
 setup_nginx()
 {
-	local -r domain="$domainlabel.com"
-	local -r conffile="/etc/nginx/sites-available/$domain"
-	local -r symlink="/etc/nginx/sites-enabled/$domain"
+	local -r -i frontend_port="$FRONTENDPORT"
+	local -r -i backend_port="$BACKENDPORT"
+	local -r conffile="/etc/nginx/sites-available/$DOMAIN"
+	local -r symlink="/etc/nginx/sites-enabled/$DOMAIN"
+
 	local -r nginx_flavour="light"
-	local -r -i frontend_port=3007
-	local -r -i backend_port=5003
 
 	log_action_begin_msg "Configure and restart webserver"
 
@@ -655,7 +743,7 @@ setup_nginx()
 		sudo tee --append "$conffile"
 		server {
 			listen 80;
-			server_name $domain www.$domain;
+			server_name $DOMAIN $FQDN;
 			location / {
 				return 301 https://\$host\$request_uri;
 			}
@@ -664,7 +752,7 @@ setup_nginx()
 		server {
 			listen 443 ssl;
 			listen [::]:443 ssl ;
-			server_name $domain www.$domain;
+			server_name $DOMAIN $FQDN;
 			location / {
 				proxy_pass http://localhost:$frontend_port;
 				proxy_http_version 1.1;
@@ -677,7 +765,7 @@ setup_nginx()
 
 		server {
 			listen 80;
-			server_name admin.$domain;
+			server_name admin.$DOMAIN;
 			location / {
 				return 301 https://\$host\$request_uri;
 			}
@@ -687,7 +775,7 @@ setup_nginx()
 		server {
 			listen 443 ssl;
 			index index.html index.htm index.nginx-debian.html;
-			server_name admin.$domain;
+			server_name admin.$DOMAIN;
 			location / {
 				proxy_pass http://localhost:$backend_port;
 				proxy_http_version 1.1;
@@ -714,8 +802,6 @@ EOF
 ###############################################################################
 install_certbot()
 {
-	local -r domain="$domainlabel.com"
-
 	install_apt_package software-properties-common
 
 	{
@@ -728,35 +814,6 @@ install_certbot()
 	install_apt_package python-certbot-nginx
 }
 
-#                                                           REMOVE_CONF_FILES()
-#
-# removes mongodb configuration files
-# only for testing purposes
-###############################################################################
-remove_conf_files()
-{
-	local -r apt_source_fn="mongodb-org-$mongodb_version.list"
-	local -r apt_source_dir="/etc/apt/sources.list.d/"
-	local -r mongo_service_fn="mongod.service"
-	local -r mongo_service_dir="/lib/systemd/system/"
-
-	if [[ -f "$apt_source_dir/$apt_source_fn" ]];
-	then
-		log_action_begin_msg "Removing source list file $apt_source_fn"
-		sudo rm "$apt_source_dir/$apt_source_fn" &>> "$LOGFILE"
-		log_action_end_msg $?
-	fi
-
-	if [[ -f "$mongo_service_dir/$mongo_service_fn" ]];
-	then
-		log_action_begin_msg "Removing system service file $mongo_service_fn"
-		sudo rm "$mongo_service_dir/$mongo_service_fn" &>> "$LOGFILE"
-		log_action_end_msg $?
-	fi
-
-	return 0
-}
-
 
 #                                                                          BODY
 ###############################################################################
@@ -765,12 +822,9 @@ remove_conf_files()
 if [ "${BASH_SOURCE[0]}" == "$0" ];
 then
 
+	trap cleanup EXIT
+
 	# source lsb init function file for advanced log functions
-	declare LOGFILE
-
-	LOGFILE=$(mktemp /tmp/"$(date +"%Y-%m-%d_%T_XXXXXX")")
-	echo "Detailed log goes to $LOGFILE"
-
 	if [[ ! -f /lib/lsb/init-functions ]];
 	then
 		>&2 echo "Error sourcing /lib/lsb/init-functions"
