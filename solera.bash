@@ -83,7 +83,7 @@ install_package_dependencies()
 {
 	local -r nginx_flavour="light"
 	local -r viaapt="git nginx-$nginx_flavour sed coreutils systemd
-					 init-system-helpers openssl gnupg curl"
+					 init-system-helpers ca-certificates curl"
 	local -r vianpm="pm2"
 
 	local package
@@ -101,12 +101,12 @@ install_package_dependencies()
 	then
 		# install instruction
 		# https://github.com/nodesource/distributions/blob/master/README.md
-		log_action_begin_msg "Installing nodejs"
+		log_action_begin_msg "Preparing nodej installation"
 		sudo --preserve-env \
 			bash - < <(curl --silent --location \
 				http://deb.nodesource.com/setup_13.x) &>> "$LOGFILE"
-		install_apt_package nodejs
 		log_action_end_msg 0
+		install_apt_package nodejs
 		# update to latest https://www.npmjs.com/get-npm
 		log_action_begin_msg "Installing latest npm"
 		sudo npm install npm@latest &>> "$LOGFILE"
@@ -340,8 +340,8 @@ install_mongodb_package()
 		log_action_end_msg 1
 		return 1
 	else
-		setup_mongo_database
 		log_action_end_msg 0
+		setup_mongo_database
 		return 0
 	fi
 }
@@ -444,14 +444,14 @@ install_javascript_dependencies()
 	local -r frontenddir="frontend"
 	local -r curwd="$(pwd)"
 
-	log_action_begin_msg "Install backend dependencies"
 	cd "$basedir/$backenddir" || return 1
+	log_action_begin_msg "Install backend dependencies"
 	npm update &>> "$LOGFILE"
 	log_action_end_msg $?
 	cd "$curwd" || return 1
 
-	log_action_begin_msg "Install frontend dependencies"
 	cd "$basedir/$frontenddir" || return 1
+	log_action_begin_msg "Install frontend dependencies"
 	npm update &>> "$LOGFILE"
 	log_action_end_msg $?
 	cd "$curwd" || return 1
@@ -700,11 +700,11 @@ setup_nginx()
 		}
 EOF
 
-	sudo sed --in-place "s/^\t//" "$conffile"
-	sudo ln --symbolic "$conffile" "$symlink"
-	sudo service nginx restart
+		sudo sed --in-place "s/^\t//" "$conffile"
+		sudo ln --symbolic "$conffile" "$symlink"
+		sudo service nginx restart
 
-} &>> "$LOGFILE"
+	} &>> "$LOGFILE"
 
 	log_end_msg 0
 
@@ -720,8 +720,8 @@ install_certbot()
 	install_apt_package software-properties-common
 
 	{
-		sudo add-apt-repository --assume-yes universe
-		sudo add-apt-repository --assume-yes ppa:certbot/certbot
+		sudo add-apt-repository --yes universe
+		sudo add-apt-repository --yes ppa:certbot/certbot
 		sudo apt-get update
 	} &>> "$LOGFILE"
 
@@ -754,58 +754,6 @@ remove_conf_files()
 		sudo rm "$mongo_service_dir/$mongo_service_fn" &>> "$LOGFILE"
 		log_action_end_msg $?
 	fi
-
-	return 0
-}
-
-
-#                                                         REMOVE_INSTALLATION()
-#
-# removes mongodb installation
-# only for testing purposes
-###############################################################################
-remove_installation()
-{
-	local -r service="mongod"
-	local -r package="mongodb-org"
-	local -r basedir="/var/www/$domainlabel"
-
-
-	if sudo service --status-all | grep --fixed-strings --quiet "$service";
-	then
-		log_action_begin_msg "Stopping system service $service"
-		sudo systemctl stop "$service" &>> "$LOGFILE";
-		log_action_end_msg 0
-	fi
-
-	if command -v pm2 &>> "$LOGLEVEL";
-	then
-		log_action_begin_msg "Removing pm2 processes"
-		grep --quiet "$domainlabel-frontend" < <(pm2 ls) && \
-			pm2 delete "$domainlabel-frontend" &>> "$LOGLEVEL"
-		grep --quiet "$domainlabel-backend" < <(pm2 ls)  && \
-			pm2 delete "$domainlabel-backend" &>> "$LOGLEVEL"
-		# removes pm2 startup scripts
-		bash -c "$(pm2 unstartup | tail --lines 1)" &>> "$LOGLEVEL"
-		pm2 save &>> "$LOGLEVEL"
-		log_action_end_msg 0
-	fi
-
-	if is_apt_package_installed "$package";
-	then
-		log_action_begin_msg "Deinstalling $package"
-		[[ -d /var/log/mongodb ]] &&
-			sudo rm --recursive /var/log/mongodb &>> "$LOGLEVEL"
-		[[ -d /var/lib/mongodb ]] && \
-			sudo rm --recursive /var/lib/mongodb &>> "$LOGLEVEL"
-		sudo apt-get --assume-yes --allow-change-held-packages \
-			purge "$package" &>> "$LOGLEVEL"
-		log_action_end_msg $?
-	fi
-
-	sudo rm --recursive --force "$basedir" &>> "$LOGLEVEL"
-
-	remove_conf_files
 
 	return 0
 }
